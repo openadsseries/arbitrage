@@ -236,6 +236,30 @@ export type ArbitrageOpportunity = {
   quotedAt: number;
 };
 
+export type DirectArbitrageExecutionQuote = {
+  executor: Address;
+  strategyId: string;
+  direction: 0 | 1;
+  params: {
+    amountInReserve: string;
+    hAmountForMint: string;
+    minimumWethOut: string;
+    minimumHypedOut: string;
+    minimumBondOut: string;
+    minimumReserveOut: string;
+  };
+  amountInReserveRaw: string;
+  expectedReturnRaw: string;
+  expectedOwnerProfitRaw: string;
+  expectedExecutorRewardRaw: string;
+  expectedWalletProfitRaw: string;
+  simulatedOwnerReturnRaw: string;
+  gasRaw: string;
+  gasPriceRaw: string;
+  rewardWethRaw: string;
+  requiredWethRaw: string;
+};
+
 const BPS = 10_000n;
 const MINIMUM_PROFIT_DENOMINATOR = 100_000n;
 

@@ -11,7 +11,7 @@ import { OgSwapPanel } from "@/components/og-swap-panel";
 import { QuickBuyPanel } from "@/components/quick-buy-panel";
 import { tokenLogoUrl } from "@/components/token-logo";
 import { CHAINS } from "@/lib/chains";
-import type { ArbitrageMarketReadiness, ReserveArbitrageExecution } from "@/lib/arbitrage";
+import type { ArbitrageMarketReadiness, DirectArbitrageExecutionQuote, ReserveArbitrageExecution } from "@/lib/arbitrage";
 import type { MarketAssetKind, VerifiedMarket } from "@/lib/onchain-types";
 import type { MarketComparisonState } from "@/lib/server/gecko-comparison";
 
@@ -44,6 +44,7 @@ export function MarketAssetDetail({
   const [historyRefreshToken, setHistoryRefreshToken] = useState(0);
   const [arbitrageBudget, setArbitrageBudget] = useState("1");
   const [activeArbitrageAmountRaw, setActiveArbitrageAmountRaw] = useState<string | null>(null);
+  const [activeExecutionQuote, setActiveExecutionQuote] = useState<DirectArbitrageExecutionQuote | null>(null);
   const [activeWatchReason, setActiveWatchReason] = useState("");
   const arbitrageBudgetRaw = useMemo(() => {
     try {
@@ -106,6 +107,8 @@ export function MarketAssetDetail({
                     checkedAmountRaw={quoteBudgetRaw}
                     marketComparison={marketComparison}
                     onEstimatedProfitChange={setEstimatedProfitRaw}
+                    active={Boolean(activeArbitrageAmountRaw)}
+                    activeQuote={activeExecutionQuote}
                     watchReason={activeArbitrageAmountRaw ? activeWatchReason : ""}
                   />
                 : <div className="price-gap-view"><div className="price-gap-heading"><span className="kicker">Live quote</span><h2>Both markets are required.</h2><p>GETHYPED needs an executable price for both tokens before it can compare them.</p></div></div>}
@@ -117,6 +120,7 @@ export function MarketAssetDetail({
                 onExecutionChange={setLatestExecution}
                 onPositionChange={() => setHistoryRefreshToken((value) => value + 1)}
                 onActiveAmountChange={setActiveArbitrageAmountRaw}
+                onActiveQuoteChange={setActiveExecutionQuote}
                 onWatchReasonChange={setActiveWatchReason}
                 budget={arbitrageBudget}
                 budgetRaw={arbitrageBudgetRaw}

@@ -11,6 +11,7 @@ import {
   getArbitrageMinimumProfit,
   type ArbitrageMarketReadiness,
   type ContinuousArbitrageSnapshot,
+  type DirectArbitrageExecutionQuote,
   type ReserveArbitrageExecution,
 } from "@/lib/arbitrage";
 import { compactActionError as errorMessage } from "@/lib/errors";
@@ -27,6 +28,22 @@ type Preparation = {
   reserveSymbol: string;
   readBlock: string;
 };
+type RelayPayload = {
+  status?: "executed" | "ready" | "waiting-gas" | "none";
+  hash?: `0x${string}`;
+  execution?: DirectArbitrageExecutionQuote | null;
+  error?: string;
+};
+
+class RelayRequestError extends Error {
+  payload: RelayPayload;
+
+  constructor(message: string, payload: RelayPayload) {
+    super(message);
+    this.name = "RelayRequestError";
+    this.payload = payload;
+  }
+}
 
 const AUTO_REPEAT_COUNT = 10n;
 const WATCH_VISIBLE_MS = 30_000;
@@ -62,6 +79,7 @@ export function MarketAutomationPanel({
   onExecutionChange,
   onPositionChange,
   onActiveAmountChange,
+  onActiveQuoteChange,
   onWatchReasonChange,
   budget,
   budgetRaw,
@@ -73,6 +91,7 @@ export function MarketAutomationPanel({
   onExecutionChange?: (execution: ReserveArbitrageExecution | null) => void;
   onPositionChange?: () => void;
   onActiveAmountChange?: (raw: string | null) => void;
+  onActiveQuoteChange?: (quote: DirectArbitrageExecutionQuote | null) => void;
   onWatchReasonChange?: (reason: string) => void;
   budget: string;
   budgetRaw: bigint | null;
@@ -237,9 +256,9 @@ export function MarketAutomationPanel({
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ owner: address, strategyId }),
     });
-    const payload = await response.json() as { hash?: `0x${string}`; error?: string };
-    if (!response.ok || !payload.hash) throw new Error(payload.error ?? "Watching.");
-    return payload.hash;
+    const payload = await response.json() as RelayPayload;
+    if (!response.ok || !payload.hash) throw new RelayRequestError(payload.error ?? "Watching.", payload);
+    return payload;
   }, []);
 
   useEffect(() => {
@@ -254,7 +273,8 @@ export function MarketAutomationPanel({
       }
       relayInFlight.current = true;
       try {
-        await relayStrategy(wallet.address!, running.id);
+        const payload = await relayStrategy(wallet.address!, running.id);
+        onActiveQuoteChange?.(payload.execution ?? null);
         relayCooldownUntil.current = Date.now() + RELAY_COOLDOWN_MS;
         if (!active) return;
         setWatchReason("");
@@ -264,6 +284,7 @@ export function MarketAutomationPanel({
       } catch (reason) {
         if (active) {
           const text = errorMessage(reason, "Watching.");
+          onActiveQuoteChange?.(reason instanceof RelayRequestError ? reason.payload.execution ?? null : null);
           setWatchReason(text);
           if (PASSIVE_WATCH_REASONS.has(text)) setError("");
         }
@@ -282,7 +303,7 @@ export function MarketAutomationPanel({
       active = false;
       if (timeout) window.clearTimeout(timeout);
     };
-  }, [activeSnapshot?.executor, onPositionChange, preparation, refreshSettledWalletState, relayStrategy, running, wallet.address]);
+  }, [activeSnapshot?.executor, onActiveQuoteChange, onPositionChange, preparation, refreshSettledWalletState, relayStrategy, running, wallet.address]);
 
   async function execute() {
     if (!preparation || budgetRaw === null || budgetError) return;
@@ -368,11 +389,13 @@ export function MarketAutomationPanel({
       let executed = false;
       try {
         setProgress("Execute");
-        await relayStrategy(address, strategyId.toString());
+        const payload = await relayStrategy(address, strategyId.toString());
+        onActiveQuoteChange?.(payload.execution ?? null);
         relayCooldownUntil.current = Date.now() + RELAY_COOLDOWN_MS;
         executed = true;
       } catch (reason) {
         const text = errorMessage(reason, "Watching.");
+        onActiveQuoteChange?.(reason instanceof RelayRequestError ? reason.payload.execution ?? null : null);
         setWatchReason(text);
         if (!PASSIVE_WATCH_REASONS.has(text)) setError(text);
       }

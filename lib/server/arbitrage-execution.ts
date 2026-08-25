@@ -7,6 +7,7 @@ import {
   ERC20_PERMISSION_ABI,
   getArbitrageCurveAmounts,
   getArbitrageExecutorV3,
+  type DirectArbitrageExecutionQuote,
 } from "@/lib/arbitrage";
 import { CHAINS } from "@/lib/chains";
 
@@ -51,6 +52,10 @@ type Candidate = {
   };
 };
 type ArbitrageClient = Pick<PublicClient, "estimateContractGas" | "getBlock" | "getGasPrice" | "readContract" | "simulateContract">;
+export type DirectArbitrageExecutionStatus =
+  | { status: "ready"; execution: DirectArbitrageExecutionQuote }
+  | { status: "waiting-gas"; execution: DirectArbitrageExecutionQuote; error: string }
+  | { status: "none"; error: string };
 
 function down(amount: bigint) {
   return amount * (BPS - SLIPPAGE_BPS) / BPS;
@@ -185,8 +190,24 @@ export async function buildDirectArbitrageExecution({
   executionAccount?: Address;
   client?: ArbitrageClient;
 }) {
+  const status = await readDirectArbitrageExecutionStatus({ owner, strategyId, executionAccount, client });
+  if (status.status === "ready") return status.execution;
+  throw new Error(status.error);
+}
+
+export async function readDirectArbitrageExecutionStatus({
+  owner,
+  strategyId,
+  executionAccount = owner,
+  client = mintclub.network("base").getPublicClient() as unknown as ArbitrageClient,
+}: {
+  owner: Address;
+  strategyId: bigint;
+  executionAccount?: Address;
+  client?: ArbitrageClient;
+}): Promise<DirectArbitrageExecutionStatus> {
   const executor = getArbitrageExecutorV3("base");
-  if (!executor) throw new Error("Arbitrage is not configured.");
+  if (!executor) return { status: "none", error: "Arbitrage is not configured." };
   const [rawStrategy, block, protocolFeeBps, rewardBps] = await Promise.all([
     client.readContract({ address: executor, abi: ARBITRAGE_EXECUTOR_V3_ABI, functionName: "strategies", args: [strategyId], blockTag: "pending" }),
     client.getBlock({ blockTag: "pending" }),
@@ -215,16 +236,16 @@ export async function buildDirectArbitrageExecution({
     remainingVolume,
     minProfitReserve,
   };
-  if (strategy.owner !== owner) throw new Error("Not your position.");
-  if (!strategy.active || strategy.remainingVolume <= 0n) throw new Error("No active position.");
-  if (strategy.validUntil !== 0n && strategy.validUntil < block.timestamp) throw new Error("Position expired.");
+  if (strategy.owner !== owner) return { status: "none", error: "Not your position." };
+  if (!strategy.active || strategy.remainingVolume <= 0n) return { status: "none", error: "No active position." };
+  if (strategy.validUntil !== 0n && strategy.validUntil < block.timestamp) return { status: "none", error: "Position expired." };
 
   const [balance, allowance] = await Promise.all([
     client.readContract({ address: strategy.reserveToken, abi: ERC20_PERMISSION_ABI, functionName: "balanceOf", args: [owner], blockTag: "pending" }),
     client.readContract({ address: strategy.reserveToken, abi: ERC20_PERMISSION_ABI, functionName: "allowance", args: [owner, executor], blockTag: "pending" }),
   ]);
   const available = [strategy.maxReserve, strategy.remainingVolume, balance, allowance].reduce((left, right) => left < right ? left : right);
-  if (available <= 0n) throw new Error("No available amount.");
+  if (available <= 0n) return { status: "none", error: "No available amount." };
 
   const bondState = await readBondState(strategy, client);
   const budgets = getArbitrageCurveAmounts(available);
@@ -234,7 +255,7 @@ export async function buildDirectArbitrageExecution({
   ]))).filter((candidate): candidate is Candidate => Boolean(candidate))
     .sort((left, right) => left.walletProfit > right.walletProfit ? -1 : left.walletProfit < right.walletProfit ? 1 : 0);
 
-  let gasRejected = false;
+  let gasRejected: DirectArbitrageExecutionQuote | null = null;
   for (const candidate of candidates) {
     try {
       const simulation = await client.simulateContract({
@@ -251,15 +272,11 @@ export async function buildDirectArbitrageExecution({
         quoteExactInput(client, strategy.reserveToken, CHAINS.base.weth, candidate.executorReward).catch(() => 0n),
       ]);
       const requiredWeth = gas * gasPrice * GAS_MARGIN_BPS / BPS;
-      if (rewardWeth < requiredWeth) {
-        gasRejected = true;
-        continue;
-      }
-      return {
+      const execution: DirectArbitrageExecutionQuote = {
         executor,
         strategyId: strategyId.toString(),
         direction: candidate.direction,
-        params: Object.fromEntries(Object.entries(candidate.params).map(([key, value]) => [key, value.toString()])),
+        params: Object.fromEntries(Object.entries(candidate.params).map(([key, value]) => [key, value.toString()])) as DirectArbitrageExecutionQuote["params"],
         amountInReserveRaw: candidate.amount.toString(),
         expectedReturnRaw: candidate.expectedReturn.toString(),
         expectedOwnerProfitRaw: candidate.ownerProfit.toString(),
@@ -271,10 +288,15 @@ export async function buildDirectArbitrageExecution({
         rewardWethRaw: rewardWeth.toString(),
         requiredWethRaw: requiredWeth.toString(),
       };
+      if (rewardWeth < requiredWeth) {
+        gasRejected ??= execution;
+        continue;
+      }
+      return { status: "ready", execution };
     } catch {
       continue;
     }
   }
-  if (gasRejected) throw new Error("Waiting for gas.");
-  throw new Error("Not executable now.");
+  if (gasRejected) return { status: "waiting-gas", execution: gasRejected, error: "Waiting for gas." };
+  return { status: "none", error: "Not executable now." };
 }

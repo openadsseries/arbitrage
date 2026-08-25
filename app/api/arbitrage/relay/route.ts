@@ -5,7 +5,7 @@ import { base } from "viem/chains";
 import { z } from "zod";
 import { ARBITRAGE_EXECUTOR_V3_ABI } from "@/lib/arbitrage";
 import { compactActionError } from "@/lib/errors";
-import { buildDirectArbitrageExecution } from "@/lib/server/arbitrage-execution";
+import { readDirectArbitrageExecutionStatus } from "@/lib/server/arbitrage-execution";
 
 export const dynamic = "force-dynamic";
 
@@ -34,12 +34,19 @@ export async function POST(request: Request) {
     const transport = http(rpcUrl(), { timeout: 12_000 });
     const publicClient = createPublicClient({ chain: base, transport });
     const walletClient = createWalletClient({ account, chain: base, transport });
-    const execution = await buildDirectArbitrageExecution({
+    const quote = await readDirectArbitrageExecutionStatus({
       owner: getAddress(input.owner),
       strategyId: BigInt(input.strategyId),
       executionAccount: account.address,
-      client: publicClient as unknown as Parameters<typeof buildDirectArbitrageExecution>[0]["client"],
+      client: publicClient as unknown as Parameters<typeof readDirectArbitrageExecutionStatus>[0]["client"],
     });
+    if (quote.status !== "ready") {
+      return NextResponse.json(
+        { status: quote.status, execution: "execution" in quote ? quote.execution : null, error: compactActionError(new Error(quote.error), "Watching.") },
+        { status: 409 },
+      );
+    }
+    const execution = quote.execution;
     const args = [
       BigInt(execution.strategyId),
       execution.direction,
@@ -61,7 +68,7 @@ export async function POST(request: Request) {
       blockTag: "pending",
     });
     const hash = await walletClient.writeContract(simulation.request);
-    return NextResponse.json({ hash, execution });
+    return NextResponse.json({ status: "executed", hash, execution });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.issues[0]?.message ?? "Invalid request." }, { status: 400 });

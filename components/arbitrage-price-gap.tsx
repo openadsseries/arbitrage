@@ -8,6 +8,7 @@ import { tokenLogoUrl } from "@/components/token-logo";
 import {
   type ArbitrageOpportunity,
   type ArbitrageOpportunityRoute,
+  type DirectArbitrageExecutionQuote,
 } from "@/lib/arbitrage";
 import { CHAINS } from "@/lib/chains";
 import type { VerifiedMarket } from "@/lib/onchain-types";
@@ -165,12 +166,16 @@ export function ArbitragePriceGap({
   marketComparison,
   checkedAmountRaw,
   onEstimatedProfitChange,
+  active = false,
+  activeQuote = null,
   watchReason = "",
 }: {
   market: VerifiedMarket;
   marketComparison: MarketComparisonState;
   checkedAmountRaw: bigint | null;
   onEstimatedProfitChange?: (raw: string | null) => void;
+  active?: boolean;
+  activeQuote?: DirectArbitrageExecutionQuote | null;
   watchReason?: string;
 }) {
   const [opportunity, setOpportunity] = useState<ArbitrageOpportunity | null>(null);
@@ -188,6 +193,15 @@ export function ArbitragePriceGap({
   }, [checkedAmountRaw]);
 
   useEffect(() => {
+    if (active) {
+      const timer = window.setTimeout(() => {
+        opportunityRef.current = null;
+        setOpportunity(null);
+        setError("");
+        setLoading(false);
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
     if (quotedAmountRaw === null) {
       const timer = window.setTimeout(() => {
         opportunityRef.current = null;
@@ -197,7 +211,7 @@ export function ArbitragePriceGap({
       }, 0);
       return () => window.clearTimeout(timer);
     }
-    let active = true;
+    let alive = true;
     let controller: AbortController | null = null;
     const read = async (initial = false) => {
       if (document.visibilityState !== "visible") return;
@@ -216,19 +230,19 @@ export function ArbitragePriceGap({
         .then(async (response) => {
           const payload = await response.json() as { opportunity?: ArbitrageOpportunity; error?: string };
           if (!response.ok || !payload.opportunity) throw new Error(payload.error ?? "The price gap could not be checked.");
-          if (!active) return;
+          if (!alive) return;
           opportunityRef.current = payload.opportunity;
           setOpportunity(payload.opportunity);
           setError("");
         })
         .catch((reason) => {
-          if (active && !(reason instanceof DOMException && reason.name === "AbortError")) {
+          if (alive && !(reason instanceof DOMException && reason.name === "AbortError")) {
             if (!opportunityRef.current) setOpportunity(null);
             setError(reason instanceof Error ? reason.message : "The price gap could not be checked.");
           }
         })
         .finally(() => {
-          if (active) setLoading(false);
+          if (alive) setLoading(false);
         });
     };
     const refreshWhenVisible = () => {
@@ -239,15 +253,15 @@ export function ArbitragePriceGap({
     document.addEventListener("visibilitychange", refreshWhenVisible);
     window.addEventListener("focus", refreshWhenVisible);
     return () => {
-      active = false;
+      alive = false;
       window.clearInterval(interval);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
       window.removeEventListener("focus", refreshWhenVisible);
       controller?.abort();
     };
-  }, [market.token, quotedAmountRaw]);
+  }, [active, market.token, quotedAmountRaw]);
 
-  const route = useMemo(() => {
+  const previewRoute = useMemo(() => {
     if (!opportunity) return null;
     return [...opportunity.routes].sort((left, right) => {
       const a = BigInt(left.ownerDifferenceRaw);
@@ -255,6 +269,26 @@ export function ArbitragePriceGap({
       return a === b ? 0 : a > b ? -1 : 1;
     })[0] ?? null;
   }, [opportunity]);
+  const activeRoute = useMemo<ArbitrageOpportunityRoute | null>(() => {
+    if (!activeQuote) return null;
+    const ownerProfit = BigInt(activeQuote.expectedOwnerProfitRaw);
+    const amountIn = BigInt(activeQuote.amountInReserveRaw);
+    const netReturnBps = amountIn > 0n ? Number(ownerProfit * 10_000n / amountIn) : 0;
+    return {
+      direction: activeQuote.direction === 0 ? "Mint then sell" : "Buy then redeem",
+      amountInRaw: activeQuote.amountInReserveRaw,
+      amountOutRaw: activeQuote.expectedReturnRaw,
+      hAmountRaw: activeQuote.direction === 0 ? activeQuote.params.hAmountForMint : activeQuote.params.minimumHypedOut,
+      grossDifferenceRaw: (BigInt(activeQuote.expectedOwnerProfitRaw) + BigInt(activeQuote.expectedExecutorRewardRaw)).toString(),
+      ownerDifferenceRaw: activeQuote.expectedOwnerProfitRaw,
+      netReturnBps,
+      withinLimit: true,
+      netPositive: ownerProfit > 0n,
+      gapBps: netReturnBps,
+      profitable: ownerProfit > 0n,
+    };
+  }, [activeQuote]);
+  const route = active ? activeRoute : previewRoute;
   const netPositive = Boolean(route && (route.netPositive ?? route.profitable));
   const chain = CHAINS[market.chain];
   const ownerReturnRaw = route
@@ -262,10 +296,11 @@ export function ArbitragePriceGap({
     : null;
   const routeDetails = route ? routeCopy(route, market, ownerReturnRaw, opportunity?.reserveDecimals ?? market.reserveDecimals) : null;
   const headline = (() => {
-    if (watchReason === "Waiting for gas.") return "Waiting for gas to drop";
+    if (active && watchReason === "Waiting for gas.") return "Waiting for gas to drop";
     if (watchReason === "Base is busy. Try again soon.") return "Checking prices";
-    if (watchReason === "No route now." || watchReason === "Not executable now.") return "No profit right now";
-    if (loading) return "Checking prices";
+    if (active && (watchReason === "No route now." || watchReason === "Not executable now.")) return "No profit right now";
+    if (active && !activeQuote) return "Checking prices";
+    if (!active && loading) return "Checking prices";
     if (quotedAmountRaw === null) return "Enter an amount";
     if (netPositive && route) return `+${((route.netReturnBps ?? route.gapBps) / 100).toFixed(2)}% profit opportunity`;
     return "No profit right now";
@@ -284,7 +319,7 @@ export function ArbitragePriceGap({
 
       <HistoricalPriceChart comparison={marketComparison} market={market} />
 
-      {route && <>
+      {route && !(active && watchReason === "Waiting for gas.") && <>
         <div className="price-gap-route-wrap">
           <span>Arbitrage path</span>
           <div className="price-gap-route visual" aria-label={routeDetails?.aria ?? "Profit path"}>
