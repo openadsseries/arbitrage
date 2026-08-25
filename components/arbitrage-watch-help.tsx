@@ -13,6 +13,21 @@ function wethAmount(raw: string) {
   return Number(formatUnits(BigInt(raw), 18)).toLocaleString("en-US", { maximumFractionDigits: 8 });
 }
 
+function usdAmount(raw: string, decimals: number, usd: number | null | undefined) {
+  if (!usd) return null;
+  const value = Number(formatUnits(BigInt(raw), decimals)) * usd;
+  if (!Number.isFinite(value)) return null;
+  const maximumFractionDigits = value > 0 && value < 0.01 ? 6 : 2;
+  return `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits })}`;
+}
+
+function gasCoverage(quote: DirectArbitrageExecutionQuote | null) {
+  if (!quote) return null;
+  const needed = BigInt(quote.requiredWethRaw);
+  if (needed <= 0n) return null;
+  return Number(BigInt(quote.rewardWethRaw) * 1_000n / needed) / 10;
+}
+
 function statusCopy(reason: string) {
   if (reason === "Gas too high." || reason === "Waiting for gas.") {
     return {
@@ -57,6 +72,13 @@ export function ArbitrageWatchHelp({
 }) {
   const [open, setOpen] = useState(false);
   const copy = statusCopy(reason);
+  const profitUsd = quote && usdAmount(quote.expectedOwnerProfitRaw, reserveDecimals, quote.reserveUsd);
+  const rewardUsd = quote && usdAmount(quote.rewardWethRaw, 18, quote.wethUsd);
+  const gasUsd = quote && usdAmount(quote.requiredWethRaw, 18, quote.wethUsd);
+  const coverage = gasCoverage(quote);
+  const meaning = copy.title === "Waiting for gas" && coverage !== null
+    ? `The relay reward covers ${coverage}% of gas, so it waits.`
+    : copy.meaning;
 
   return <>
     {trigger === "details"
@@ -68,13 +90,13 @@ export function ArbitrageWatchHelp({
         <span className="kicker">Status</span>
         <h2>{copy.title}</h2>
         <div className="market-details-grid status-details-grid">
-          <div><strong>Meaning</strong><p>{copy.meaning}</p></div>
+          <div><strong>Meaning</strong><p>{meaning}</p></div>
           <div><strong>What helps</strong><p>{copy.action}</p></div>
         </div>
         {quote && <dl>
-          <div><dt>Profit</dt><dd>+{tokenAmount(quote.expectedOwnerProfitRaw, reserveDecimals)} {reserveSymbol}</dd></div>
-          <div><dt>Relay reward</dt><dd>{wethAmount(quote.rewardWethRaw)} WETH</dd></div>
-          <div><dt>Gas needed</dt><dd>{wethAmount(quote.requiredWethRaw)} WETH</dd></div>
+          <div><dt>Profit</dt><dd>+{tokenAmount(quote.expectedOwnerProfitRaw, reserveDecimals)} {reserveSymbol}{profitUsd ? ` · ≈ ${profitUsd}` : ""}</dd></div>
+          <div><dt>Relay reward</dt><dd>{wethAmount(quote.rewardWethRaw)} WETH{rewardUsd ? ` · ≈ ${rewardUsd}` : ""}</dd></div>
+          <div><dt>Gas needed</dt><dd>{wethAmount(quote.requiredWethRaw)} WETH{gasUsd ? ` · ≈ ${gasUsd}` : ""}</dd></div>
         </dl>}
       </section>
     </div>}

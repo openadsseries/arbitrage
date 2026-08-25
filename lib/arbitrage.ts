@@ -258,6 +258,8 @@ export type DirectArbitrageExecutionQuote = {
   gasPriceRaw: string;
   rewardWethRaw: string;
   requiredWethRaw: string;
+  reserveUsd?: number | null;
+  wethUsd?: number | null;
 };
 
 const BPS = 10_000n;

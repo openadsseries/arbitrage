@@ -10,6 +10,7 @@ import {
   type DirectArbitrageExecutionQuote,
 } from "@/lib/arbitrage";
 import { CHAINS } from "@/lib/chains";
+import { readTokenMarketPrice } from "@/lib/server/gecko-market";
 
 const ONCHAIN_ROUTER = "0xCa7a19BD1E260DCd92B17DdAc068C2bF67539a02" as const;
 const BPS = 10_000n;
@@ -79,6 +80,18 @@ async function quoteExactInput(client: ArbitrageClient, tokenIn: Address, tokenO
   });
   if (quote.amountOut <= 0n) throw new Error("No route.");
   return quote.amountOut;
+}
+
+async function addUsdPrices(execution: DirectArbitrageExecutionQuote, reserveToken: Address) {
+  const [reservePrice, wethPrice] = await Promise.all([
+    readTokenMarketPrice("base", reserveToken),
+    readTokenMarketPrice("base", CHAINS.base.weth),
+  ]);
+  return {
+    ...execution,
+    reserveUsd: reservePrice?.usd ?? null,
+    wethUsd: wethPrice?.usd ?? null,
+  };
 }
 
 async function readBondState(strategy: Strategy, client: ArbitrageClient) {
@@ -292,11 +305,17 @@ export async function readDirectArbitrageExecutionStatus({
         gasRejected ??= execution;
         continue;
       }
-      return { status: "ready", execution };
+      return { status: "ready", execution: await addUsdPrices(execution, strategy.reserveToken) };
     } catch {
       continue;
     }
   }
-  if (gasRejected) return { status: "waiting-gas", execution: gasRejected, error: "Waiting for gas." };
+  if (gasRejected) {
+    return {
+      status: "waiting-gas",
+      execution: await addUsdPrices(gasRejected, strategy.reserveToken),
+      error: "Waiting for gas.",
+    };
+  }
   return { status: "none", error: "Not executable now." };
 }
