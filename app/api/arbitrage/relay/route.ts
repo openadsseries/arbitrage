@@ -43,7 +43,6 @@ export async function POST(request: Request) {
     if (quote.status !== "ready") {
       return NextResponse.json(
         { status: quote.status, execution: "execution" in quote ? quote.execution : null, error: compactActionError(new Error(quote.error), "Watching.") },
-        { status: 409 },
       );
     }
     const execution = quote.execution;
