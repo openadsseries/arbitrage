@@ -22,6 +22,11 @@ function tokenAmount(raw: string, decimals: number) {
   return compact(value);
 }
 
+function signedTokenAmount(raw: bigint, decimals: number) {
+  const prefix = raw > 0n ? "+" : "";
+  return `${prefix}${tokenAmount(raw.toString(), decimals)}`;
+}
+
 function marketFor(markets: VerifiedMarket[], hToken: Address) {
   return markets.find((market) => market.chain === "base" && market.token.toLowerCase() === hToken.toLowerCase());
 }
@@ -56,6 +61,31 @@ export function ArbitragePortfolio({ wallet, markets }: { wallet: Address; marke
   }, [wallet]);
 
   const activeStrategies = useMemo(() => continuous?.strategies.filter((item) => item.active && BigInt(item.remainingVolumeRaw) > 0n && (item.validUntil === 0 || item.validUntil > (continuous.readTimestamp ?? 0))) ?? [], [continuous]);
+  const totalPnl = useMemo(() => {
+    const groups = new Map<string, { raw: bigint; decimals: number; symbol: string }>();
+    if (!continuous) return [];
+    for (const execution of continuous.executions) {
+      const strategy = continuous.strategies.find((item) => item.id === execution.strategyId);
+      const market = strategy ? marketFor(markets, strategy.hToken) : undefined;
+      const reserveToken = strategy?.reserveToken ?? execution.reserveToken;
+      const key = reserveToken.toLowerCase();
+      const current = groups.get(key) ?? {
+        raw: 0n,
+        decimals: market?.reserveDecimals ?? 18,
+        symbol: market?.reserveSymbol ?? "Reserve",
+      };
+      current.raw += BigInt(execution.ownerProfitReserveRaw) + (
+        execution.executor.toLowerCase() === wallet.toLowerCase()
+          ? BigInt(execution.executorRewardReserveRaw)
+          : 0n
+      );
+      groups.set(key, current);
+    }
+    return [...groups.values()];
+  }, [continuous, markets, wallet]);
+  const totalPnlLabel = totalPnl.length
+    ? totalPnl.map((item) => `${signedTokenAmount(item.raw, item.decimals)} ${item.symbol}`).join(" · ")
+    : "0";
 
   async function stopContinuous(strategyId: string, reserveToken: Address) {
     if (!continuous?.executor) return;
@@ -89,6 +119,21 @@ export function ArbitragePortfolio({ wallet, markets }: { wallet: Address; marke
 
   return (
     <div className="automation-page">
+      <section className="automation-stats" aria-label="Arbitrage summary">
+        <div>
+          <span>Total PnL</span>
+          <strong className={totalPnl.some((item) => item.raw > 0n) ? "positive" : ""}>{totalPnlLabel}</strong>
+        </div>
+        <div>
+          <span>Watching</span>
+          <strong>{activeStrategies.length}</strong>
+        </div>
+        <div>
+          <span>Runs</span>
+          <strong>{continuous.executions.length}</strong>
+        </div>
+      </section>
+
       <section className="automation-list-section">
         <div className="section-heading portfolio-arb-heading">
           <h2>Active</h2>

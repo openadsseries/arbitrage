@@ -908,6 +908,7 @@ button { color: inherit; }
 .automation-stats span, .automation-stats strong, .automation-stats small { display: block; }
 .automation-stats span { color: var(--muted); font-size: var(--text-meta); font-weight: 800; }
 .automation-stats strong { margin: 8px 0 4px; font-size: var(--text-data); letter-spacing: -.04em; }
+.automation-stats strong.positive { color: var(--success); }
 .automation-stats small { color: var(--muted); font-size: var(--text-meta); }
 .automation-start { display: grid; grid-template-columns: minmax(240px,.75fr) minmax(0,1.25fr); gap: 42px; padding: 34px; border-radius: 16px; color: #fff9fc; background: var(--ink-warm); }
 .automation-intro h2 { margin: 8px 0 12px; max-width: 390px; font-size: var(--text-card-title); letter-spacing: -.04em; line-height: 1.05; }
