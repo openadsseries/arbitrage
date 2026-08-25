@@ -1,11 +1,8 @@
 import { NextResponse } from "next/server";
-import { unstable_cache } from "next/cache";
 import { getAddress, isAddress } from "viem";
 import { z } from "zod";
 import type { ChainKey } from "@/lib/chains";
-import { readArbitrageMarketReadiness } from "@/lib/server/arbitrage";
-import { readMarketComparison } from "@/lib/server/gecko-comparison";
-import { readVerifiedMarket } from "@/lib/server/markets";
+import { readMarketDetailSnapshot } from "@/lib/server/market-snapshots";
 
 export const dynamic = "force-dynamic";
 
@@ -13,31 +10,6 @@ const querySchema = z.object({
   chain: z.enum(["base", "robinhood"]),
   address: z.string().refine(isAddress, "Enter a valid Hyped Token address."),
 });
-
-const readCachedMarketDetail = unstable_cache(
-  async (chain: ChainKey, inputAddress: string) => {
-    const address = getAddress(inputAddress);
-    const market = await readVerifiedMarket(chain, address);
-    if (!market) return null;
-    const arbitrageReadiness = chain === "base"
-      ? await readArbitrageMarketReadiness(chain, market.token).catch(() => null)
-      : null;
-    const marketComparison = arbitrageReadiness
-      ? await readMarketComparison({
-        chain,
-        og: arbitrageReadiness.originalMarket.pool
-          ? { token: market.reserveToken, pool: arbitrageReadiness.originalMarket.pool }
-          : null,
-        hyped: arbitrageReadiness.hypedMarket.pool
-          ? { token: market.token, pool: arbitrageReadiness.hypedMarket.pool }
-          : null,
-      })
-      : { status: "unavailable" as const, reason: "markets-not-ready" as const };
-    return { market, arbitrageReadiness, marketComparison };
-  },
-  ["market-detail-v1"],
-  { revalidate: 15 },
-);
 
 export async function GET(request: Request) {
   try {
@@ -48,7 +20,7 @@ export async function GET(request: Request) {
     });
     const chain = input.chain as ChainKey;
     const address = getAddress(input.address);
-    const detail = await readCachedMarketDetail(chain, address);
+    const detail = await readMarketDetailSnapshot(chain, address);
     if (!detail) return NextResponse.json({ error: "Market not found." }, { status: 404 });
 
     return NextResponse.json(

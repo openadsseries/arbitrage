@@ -11,7 +11,7 @@ import { OgSwapPanel } from "@/components/og-swap-panel";
 import { QuickBuyPanel } from "@/components/quick-buy-panel";
 import { tokenLogoUrl } from "@/components/token-logo";
 import { CHAINS } from "@/lib/chains";
-import type { ArbitrageMarketReadiness, DirectArbitrageExecutionQuote, ReserveArbitrageExecution } from "@/lib/arbitrage";
+import type { ArbitrageMarketReadiness, ArbitrageOpportunity, DirectArbitrageExecutionQuote, ReserveArbitrageExecution } from "@/lib/arbitrage";
 import type { MarketAssetKind, VerifiedMarket } from "@/lib/onchain-types";
 import type { MarketComparisonState } from "@/lib/server/gecko-comparison";
 
@@ -32,10 +32,12 @@ export function MarketAssetDetail({
   market,
   arbitrageReadiness,
   marketComparison,
+  initialOpportunity,
 }: {
   market: VerifiedMarket;
   arbitrageReadiness: ArbitrageMarketReadiness | null;
   marketComparison: MarketComparisonState;
+  initialOpportunity: ArbitrageOpportunity | null;
 }) {
   const chain = CHAINS[market.chain];
   const [view, setView] = useState<"arbitrage" | MarketAssetKind>("arbitrage");
@@ -106,6 +108,7 @@ export function MarketAssetDetail({
                     market={market}
                     checkedAmountRaw={quoteBudgetRaw}
                     marketComparison={marketComparison}
+                    initialOpportunity={initialOpportunity}
                     onEstimatedProfitChange={setEstimatedProfitRaw}
                     active={Boolean(activeArbitrageAmountRaw)}
                     activeQuote={activeExecutionQuote}

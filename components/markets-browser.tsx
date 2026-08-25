@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, LoaderCircle, Search } from "lucide-react";
 import { formatUnits, isAddress } from "viem";
@@ -59,55 +59,84 @@ function previewHint(preview: ArbitragePreviewState | undefined) {
   return preview.route === "Mint then sell" ? "Mint, sell pool" : "Buy, redeem";
 }
 
-export function MarketsBrowser({ initial, unavailableChains }: { initial: VerifiedMarket[]; unavailableChains: ChainKey[] }) {
+export function MarketsBrowser({
+  initial,
+  unavailableChains,
+  initialError = "",
+}: {
+  initial: VerifiedMarket[];
+  unavailableChains: ChainKey[];
+  initialError?: string;
+}) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState("");
-  const [marketError, setMarketError] = useState("");
-  const [loadingMarkets, setLoadingMarkets] = useState(initial.length === 0 && unavailableChains.length === 0);
+  const [marketError, setMarketError] = useState(initialError);
+  const [loadingMarkets, setLoadingMarkets] = useState(initial.length === 0 && Boolean(initialError));
   const [remoteMarkets, setRemoteMarkets] = useState(initial);
   const [remoteUnavailableChains, setRemoteUnavailableChains] = useState(unavailableChains);
   const [addressMatches, setAddressMatches] = useState<VerifiedMarket[]>([]);
   const [walletLaunched, setWalletLaunched] = useState<VerifiedMarket[]>([]);
   const [arbitragePreviews, setArbitragePreviews] = useState<Record<string, ArbitragePreviewState>>({});
+  const launchedRequests = useRef(new Set<string>());
 
   useEffect(() => {
     let active = true;
-    const controller = new AbortController();
-    fetch("/api/markets", { cache: "no-store", signal: controller.signal })
-      .then(async (response) => {
+    let controller: AbortController | null = null;
+    const read = async () => {
+      if (document.visibilityState !== "visible") return;
+      controller?.abort();
+      controller = new AbortController();
+      try {
+        const response = await fetch("/api/markets", { cache: "no-store", signal: controller.signal });
         const payload = await response.json() as { markets?: VerifiedMarket[]; unavailableChains?: ChainKey[]; error?: string };
         if (!response.ok || !payload.markets) throw new Error(payload.error ?? "Could not read markets.");
         if (!active) return;
         setRemoteMarkets(payload.markets);
         setRemoteUnavailableChains(payload.unavailableChains ?? []);
-      })
-      .catch((reason) => {
+        setMarketError("");
+      } catch (reason) {
         if (active && !(reason instanceof DOMException && reason.name === "AbortError")) {
           setMarketError(reason instanceof Error ? reason.message : "Could not read markets.");
         }
-      })
-      .finally(() => {
+      } finally {
         if (active) setLoadingMarkets(false);
-      });
+      }
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void read();
+    };
+    if (initialError) void read();
+    const interval = window.setInterval(refreshWhenVisible, 30_000);
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
       active = false;
-      controller.abort();
+      controller?.abort();
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
-  }, []);
+  }, [initialError]);
 
   useEffect(() => {
+    const existing = new Set(remoteMarkets.map((market) => market.token.toLowerCase()));
     const addresses = readManifests()
       .filter((manifest) => manifest.stage === "verified" && manifest.execution.hypedToken)
-      .map((manifest) => manifest.execution.hypedToken!);
+      .map((manifest) => manifest.execution.hypedToken!)
+      .filter((address) => !existing.has(address.toLowerCase()) && !launchedRequests.current.has(address.toLowerCase()));
     if (addresses.length === 0) return;
-    void Promise.all(addresses.map(async (address) => {
-      const response = await fetch(`/api/market?address=${address}`, { cache: "no-store" });
-      const payload = await response.json() as { markets?: VerifiedMarket[] };
-      return response.ok ? payload.markets ?? [] : [];
-    })).then((results) => setWalletLaunched(results.flat()));
-  }, []);
+    addresses.forEach((address) => launchedRequests.current.add(address.toLowerCase()));
+    const timeout = window.setTimeout(() => {
+      void Promise.all(addresses.map(async (address) => {
+        const response = await fetch(`/api/market?address=${address}`, { cache: "no-store" });
+        const payload = await response.json() as { markets?: VerifiedMarket[] };
+        return response.ok ? payload.markets ?? [] : [];
+      })).then((results) => setWalletLaunched((current) => [...current, ...results.flat()]));
+    }, 1_500);
+    return () => window.clearTimeout(timeout);
+  }, [remoteMarkets]);
 
   const allMarkets = useMemo(() => {
     const map = new Map<string, VerifiedMarket>();
@@ -228,9 +257,11 @@ export function MarketsBrowser({ initial, unavailableChains }: { initial: Verifi
           <div className="table-head"><span>Market</span><span>Price</span><span>Market cap</span><span>Backing</span><span>Arbitrage</span><span>Action</span></div>
           {markets.map((market) => {
             const preview = arbitragePreviews[`${market.chain}-${market.token.toLowerCase()}`];
+            const href = `/market/${market.chain}/${market.token}`;
+            const prefetch = () => router.prefetch(href);
             return (
             <div className="market-row" key={`${market.chain}-${market.token}`}>
-              <Link className="market-name with-logo" href={`/market/${market.chain}/${market.token}`}>
+              <Link className="market-name with-logo" href={href} onFocus={prefetch} onMouseEnter={prefetch}>
                 <span className="token-chain-logo"><Image src={tokenLogoUrl(market.token, market.chain === "base" ? 8453 : 4663)} alt="" width={34} height={34} unoptimized /><ChainBadge chain={market.chain} /></span>
                 <b>{market.symbol}<small>{market.reserveSymbol} reserve</small></b>
               </Link>
@@ -244,7 +275,7 @@ export function MarketsBrowser({ initial, unavailableChains }: { initial: Verifi
                 <strong>{previewLabel(preview)}</strong>
                 <small>{previewHint(preview)}</small>
               </span>
-              <Link className="market-buy" href={`/market/${market.chain}/${market.token}`}>Arbitrage</Link>
+              <Link className="market-buy" href={href} onFocus={prefetch} onMouseEnter={prefetch}>Arbitrage</Link>
             </div>
           );})}
         </div>

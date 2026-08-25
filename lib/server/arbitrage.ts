@@ -13,6 +13,7 @@ import {
   type ArbitrageStrategy,
 } from "@/lib/arbitrage";
 import { CHAINS, type ChainKey } from "@/lib/chains";
+import type { VerifiedMarket } from "@/lib/onchain-types";
 import { readVerifiedMarket } from "@/lib/server/markets";
 const ONCHAIN_ROUTER = "0xCa7a19BD1E260DCd92B17DdAc068C2bF67539a02" as const;
 const ONCHAIN_ROUTER_ABI = parseAbi([
@@ -200,9 +201,17 @@ export async function readArbitrageMarketReadiness(
   hToken: Address,
 ): Promise<ArbitrageMarketReadiness> {
   if (chain !== "base") throw new Error("Arbitrage is available on Base first.");
-  const client = publicClient("base");
   const market = await readVerifiedMarket("base", hToken);
   if (!market) throw new Error("This Hyped Token was not found in Mint Club on Base.");
+
+  return readArbitrageMarketReadinessForMarket(market);
+}
+
+export async function readArbitrageMarketReadinessForMarket(
+  market: VerifiedMarket,
+): Promise<ArbitrageMarketReadiness> {
+  if (market.chain !== "base") throw new Error("Arbitrage is available on Base first.");
+  const client = publicClient("base");
 
   const executor = getArbitrageExecutorV3("base");
   const [originalMarket, hypedExecutableMarket, executorCode] = await Promise.all([

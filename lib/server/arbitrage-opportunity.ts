@@ -11,6 +11,7 @@ import {
   type ArbitrageOpportunity,
 } from "@/lib/arbitrage";
 import { CHAINS } from "@/lib/chains";
+import type { VerifiedMarket } from "@/lib/onchain-types";
 import { readTokenMarketPrice } from "@/lib/server/gecko-market";
 import { readVerifiedMarket } from "@/lib/server/markets";
 
@@ -64,14 +65,24 @@ export async function readArbitrageOpportunity(
   checkedAmount: bigint,
 ): Promise<ArbitrageOpportunity> {
   if (checkedAmount <= 0n) throw new Error("Enter an original token amount greater than zero.");
+  const market = await readVerifiedMarket("base", hToken);
+  if (!market) throw new Error("This Hyped Token was not found in Mint Club on Base.");
+
+  return readArbitrageOpportunityForMarket(market, checkedAmount);
+}
+
+export async function readArbitrageOpportunityForMarket(
+  market: VerifiedMarket,
+  checkedAmount: bigint,
+): Promise<ArbitrageOpportunity> {
+  if (checkedAmount <= 0n) throw new Error("Enter an original token amount greater than zero.");
+  if (market.chain !== "base") throw new Error("Arbitrage is available on Base first.");
 
   const executor = getArbitrageExecutorV3("base");
   if (!executor) throw new Error("Continuous arbitrage is not configured on Base.");
 
   const client = mintclub.network("base").getPublicClient();
   const readBlock = await client.getBlockNumber();
-  const market = await readVerifiedMarket("base", hToken);
-  if (!market) throw new Error("This Hyped Token was not found in Mint Club on Base.");
   if (market.reserveToken.toLowerCase() === CHAINS.base.weth.toLowerCase()) {
     throw new Error("This market does not have a separate original token route.");
   }

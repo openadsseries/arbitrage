@@ -2,8 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { getAddress } from "viem";
-import { MarketDetailLoader } from "@/components/market-detail-loader";
+import { MarketAssetDetail } from "@/components/market-asset-detail";
 import type { ChainKey } from "@/lib/chains";
+import { readMarketDetailSnapshot } from "@/lib/server/market-snapshots";
 
 export default async function MarketDetailPage({ params }: { params: Promise<{ chain: string; address: string }> }) {
   const input = await params;
@@ -11,10 +12,12 @@ export default async function MarketDetailPage({ params }: { params: Promise<{ c
   let address;
   try { address = getAddress(input.address); } catch { notFound(); }
   const chainKey = input.chain as ChainKey;
+  const detail = await readMarketDetailSnapshot(chainKey, address);
+  if (!detail) notFound();
   return (
     <div className="inner-page page-shell market-detail-page">
       <Link href="/markets" className="back-link"><ArrowLeft /> Markets</Link>
-      <MarketDetailLoader chain={chainKey} address={address} />
+      <MarketAssetDetail {...detail} />
     </div>
   );
 }

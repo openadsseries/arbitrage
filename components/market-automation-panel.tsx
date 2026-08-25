@@ -16,6 +16,7 @@ import {
   type ReserveArbitrageExecution,
 } from "@/lib/arbitrage";
 import { compactActionError as errorMessage } from "@/lib/errors";
+import { readContinuousArbitrageSnapshot } from "@/lib/continuous-arbitrage-client";
 import type { VerifiedMarket } from "@/lib/onchain-types";
 import { sendAtomicCallsIfSupported } from "@/lib/wallet-calls";
 
@@ -112,7 +113,6 @@ export function MarketAutomationPanel({
   const [snapshot, setSnapshot] = useState<ContinuousArbitrageSnapshot | null>(null);
   const [snapshotOwner, setSnapshotOwner] = useState<Address | null>(null);
   const [readiness, setReadiness] = useState<ArbitrageMarketReadiness | null>(initialReadiness);
-  const [preparation, setPreparation] = useState<Preparation | null>(null);
   const [reserveBalanceRaw, setReserveBalanceRaw] = useState<bigint | null>(null);
   const [reserveAllowanceRaw, setReserveAllowanceRaw] = useState(0n);
   const [busy, setBusy] = useState(false);
@@ -126,10 +126,7 @@ export function MarketAutomationPanel({
   const relayCooldownUntil = useRef(0);
 
   const readSnapshot = useCallback(async (address: Address) => {
-    const response = await fetch(`/api/arbitrage/v3?wallet=${address}`, { cache: "no-store" });
-    const payload = await response.json() as { snapshot?: ContinuousArbitrageSnapshot; error?: string };
-    if (!response.ok || !payload.snapshot) throw new Error(payload.error ?? "Could not read arbitrage.");
-    return payload.snapshot;
+    return readContinuousArbitrageSnapshot(address);
   }, []);
 
   useEffect(() => {
@@ -147,20 +144,15 @@ export function MarketAutomationPanel({
     return () => controller.abort();
   }, [initialReadiness, market.chain, market.token]);
 
-  useEffect(() => {
-    if (market.chain !== "base" || !readiness?.ready) return;
-    const controller = new AbortController();
-    fetch(`/api/arbitrage/prepare?chain=base&token=${market.token}`, { cache: "no-store", signal: controller.signal })
-      .then(async (response) => {
-        const payload = await response.json() as { preparation?: Preparation; error?: string };
-        if (!response.ok || !payload.preparation) throw new Error(payload.error ?? "This market is not ready for arbitrage.");
-        setPreparation(payload.preparation);
-      })
-      .catch((reason) => {
-        if (!(reason instanceof DOMException && reason.name === "AbortError")) setError(errorMessage(reason, "This market is not ready for arbitrage."));
-      });
-    return () => controller.abort();
-  }, [market.chain, market.token, readiness?.ready]);
+  const preparation = useMemo<Preparation | null>(() => readiness?.ready && readiness.executor ? {
+    chain: "base",
+    executor: readiness.executor,
+    hToken: readiness.hToken,
+    hSymbol: readiness.hSymbol,
+    reserveToken: readiness.reserveToken,
+    reserveSymbol: readiness.reserveSymbol,
+    readBlock: readiness.readBlock,
+  } : null, [readiness]);
 
   const refreshWalletState = useCallback(async (address: Address, nextPreparation: Preparation | null) => {
     const nextSnapshot = await readSnapshot(address);

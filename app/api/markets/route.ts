@@ -1,22 +1,7 @@
 import { NextResponse } from "next/server";
-import { unstable_cache } from "next/cache";
-import type { ChainKey } from "@/lib/chains";
-import { readVerifiedMarkets } from "@/lib/server/markets";
+import { MARKET_CHAINS, readMarketsSnapshot } from "@/lib/server/market-snapshots";
 
 export const dynamic = "force-dynamic";
-
-const MARKET_CHAINS: ChainKey[] = ["base", "robinhood"];
-
-const readMarketsSnapshot = unstable_cache(
-  async () => {
-    const results = await Promise.allSettled(MARKET_CHAINS.map((chain) => readVerifiedMarkets(chain)));
-    const markets = results.flatMap((result) => result.status === "fulfilled" ? result.value : []);
-    const unavailableChains = MARKET_CHAINS.filter((_, index) => results[index].status === "rejected");
-    return { markets, unavailableChains };
-  },
-  ["markets-snapshot-v1"],
-  { revalidate: 30 },
-);
 
 export async function GET() {
   try {

@@ -18,6 +18,7 @@ import {
 } from "@/lib/arbitrage";
 import { CHAINS } from "@/lib/chains";
 import { compactActionError as compactError } from "@/lib/errors";
+import { readContinuousArbitrageSnapshot } from "@/lib/continuous-arbitrage-client";
 import type { VerifiedMarket } from "@/lib/onchain-types";
 
 function tokenAmount(raw: string, decimals: number) {
@@ -55,10 +56,7 @@ export function MarketArbitrageHistory({
       setSnapshot(null);
       return;
     }
-    const response = await fetch(`/api/arbitrage/v3?wallet=${wallet.address}`, { cache: "no-store" });
-    const payload = await response.json() as { snapshot?: ContinuousArbitrageSnapshot; error?: string };
-    if (!response.ok || !payload.snapshot) throw new Error(payload.error ?? "Could not read arbitrage.");
-    setSnapshot(payload.snapshot);
+    setSnapshot(await readContinuousArbitrageSnapshot(wallet.address));
   }, [wallet.address]);
 
   useEffect(() => {

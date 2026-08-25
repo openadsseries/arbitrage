@@ -164,6 +164,7 @@ function HistoricalPriceChart({
 export function ArbitragePriceGap({
   market,
   marketComparison,
+  initialOpportunity,
   checkedAmountRaw,
   onEstimatedProfitChange,
   active = false,
@@ -172,16 +173,18 @@ export function ArbitragePriceGap({
 }: {
   market: VerifiedMarket;
   marketComparison: MarketComparisonState;
+  initialOpportunity?: ArbitrageOpportunity | null;
   checkedAmountRaw: bigint | null;
   onEstimatedProfitChange?: (raw: string | null) => void;
   active?: boolean;
   activeQuote?: DirectArbitrageExecutionQuote | null;
   watchReason?: string;
 }) {
-  const [opportunity, setOpportunity] = useState<ArbitrageOpportunity | null>(null);
-  const [loading, setLoading] = useState(true);
+  const initialMatches = Boolean(initialOpportunity && initialOpportunity.checkedAmountRaw === checkedAmountRaw?.toString());
+  const [opportunity, setOpportunity] = useState<ArbitrageOpportunity | null>(initialMatches ? initialOpportunity ?? null : null);
+  const [loading, setLoading] = useState(!initialMatches);
   const [error, setError] = useState("");
-  const opportunityRef = useRef<ArbitrageOpportunity | null>(null);
+  const opportunityRef = useRef<ArbitrageOpportunity | null>(initialMatches ? initialOpportunity ?? null : null);
   const [quotedAmountRaw, setQuotedAmountRaw] = useState<bigint | null>(checkedAmountRaw);
 
   useEffect(() => {
@@ -248,7 +251,15 @@ export function ArbitragePriceGap({
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") void read();
     };
-    void read(true);
+    const current = opportunityRef.current;
+    const currentIsFresh = current?.checkedAmountRaw === quotedAmountRaw.toString()
+      && Math.floor(Date.now() / 1000) - current.quotedAt < 15;
+    if (currentIsFresh) {
+      setOpportunity(current);
+      setLoading(false);
+    } else {
+      void read(true);
+    }
     const interval = window.setInterval(refreshWhenVisible, 30_000);
     document.addEventListener("visibilitychange", refreshWhenVisible);
     window.addEventListener("focus", refreshWhenVisible);

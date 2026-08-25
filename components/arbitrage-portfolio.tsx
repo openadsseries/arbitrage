@@ -13,6 +13,7 @@ import {
 } from "@/lib/arbitrage";
 import { CHAINS } from "@/lib/chains";
 import { compactActionError as actionError } from "@/lib/errors";
+import { readContinuousArbitrageSnapshot } from "@/lib/continuous-arbitrage-client";
 import { compact, shortAddress } from "@/lib/format";
 import type { VerifiedMarket } from "@/lib/onchain-types";
 
@@ -39,20 +40,15 @@ export function ArbitragePortfolio({ wallet, markets }: { wallet: Address; marke
   const [message, setMessage] = useState("");
 
   async function refresh() {
-    const continuousResponse = await fetch(`/api/arbitrage/v3?wallet=${wallet}`, { cache: "no-store" });
-    const continuousPayload = await continuousResponse.json() as { snapshot?: ContinuousArbitrageSnapshot; error?: string };
-    if (!continuousResponse.ok || !continuousPayload.snapshot) throw new Error(continuousPayload.error ?? "Could not read arbitrage.");
-    setContinuous(continuousPayload.snapshot);
+    setContinuous(await readContinuousArbitrageSnapshot(wallet));
   }
 
   useEffect(() => {
     let active = true;
-    fetch(`/api/arbitrage/v3?wallet=${wallet}`, { cache: "no-store" })
-      .then(async (continuousResponse) => {
-        const continuousPayload = await continuousResponse.json() as { snapshot?: ContinuousArbitrageSnapshot; error?: string };
-        if (!continuousResponse.ok || !continuousPayload.snapshot) throw new Error(continuousPayload.error ?? "Could not read arbitrage.");
+    readContinuousArbitrageSnapshot(wallet)
+      .then((snapshot) => {
         if (!active) return;
-        setContinuous(continuousPayload.snapshot);
+        setContinuous(snapshot);
       })
       .catch((reason) => {
         if (active) setError(actionError(reason, "Could not read arbitrage."));
