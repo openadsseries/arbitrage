@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, Info, LoaderCircle, Pause, Play, ShieldCheck, X } from "lucide-react";
 import { encodeFunctionData, formatUnits, type Address } from "viem";
+import { ArbitrageWatchHelp } from "@/components/arbitrage-watch-help";
 import { useWallet } from "@/components/wallet-provider";
 import {
   ARBITRAGE_EXECUTOR_V3_ABI,
@@ -68,46 +69,6 @@ function relayWatchReason(reason: unknown) {
 
 function reserveAmount(raw: string, decimals: number) {
   return Number(formatUnits(BigInt(raw), decimals)).toLocaleString("en-US", { maximumFractionDigits: 8 });
-}
-
-function wethAmount(raw: string) {
-  return Number(formatUnits(BigInt(raw), 18)).toLocaleString("en-US", { maximumFractionDigits: 8 });
-}
-
-function WatchHelp({
-  reason,
-  quote,
-  reserveSymbol,
-  reserveDecimals,
-}: {
-  reason: string;
-  quote: DirectArbitrageExecutionQuote | null;
-  reserveSymbol: string;
-  reserveDecimals: number;
-}) {
-  const gasWait = reason === "Gas too high." || reason === "Waiting for gas.";
-  return <details className="watch-help">
-    <summary aria-label="Explain status">?</summary>
-    <div>
-      {gasWait ? <>
-        <strong>Gas is too high.</strong>
-        {quote && <>
-          <span>Profit +{reserveAmount(quote.expectedOwnerProfitRaw, reserveDecimals)} {reserveSymbol}</span>
-          <span>Reward {wethAmount(quote.rewardWethRaw)} WETH</span>
-          <span>Gas needs {wethAmount(quote.requiredWethRaw)} WETH</span>
-        </>}
-      </> : reason === "No route now." || reason === "Not executable now." ? <>
-        <strong>No route now.</strong>
-        <span>It keeps checking both directions.</span>
-      </> : reason === "Base is busy. Try again soon." ? <>
-        <strong>Base is busy.</strong>
-        <span>It will retry automatically.</span>
-      </> : <>
-        <strong>Watching prices.</strong>
-        <span>It runs when profit covers fees and gas.</span>
-      </>}
-    </div>
-  </details>;
 }
 
 function wait(ms: number) {
@@ -567,7 +528,7 @@ export function MarketAutomationPanel({
   return <section className="market-auto-panel">
     {running ? <>
       <div className="market-auto-status">
-        <span><i /> {activeStatusLabel}<WatchHelp reason={watchReason} quote={lastRelayQuote} reserveSymbol={market.reserveSymbol} reserveDecimals={market.reserveDecimals} /></span>
+        <span><i /> {activeStatusLabel}<ArbitrageWatchHelp reason={watchReason} quote={lastRelayQuote} reserveSymbol={market.reserveSymbol} reserveDecimals={market.reserveDecimals} /></span>
         <small>{watchReason || "This browser"}</small>
       </div>
       <h2>{watchReason === "Gas too high." ? "Waiting for gas." : "Watching prices."}</h2>
