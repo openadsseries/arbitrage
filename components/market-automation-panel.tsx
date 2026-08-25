@@ -41,6 +41,8 @@ type DirectExecution = {
   };
 };
 
+const AUTO_REPEAT_COUNT = 10n;
+
 function reserveAmount(raw: string, decimals: number) {
   return Number(formatUnits(BigInt(raw), decimals)).toLocaleString("en-US", { maximumFractionDigits: 8 });
 }
@@ -190,7 +192,6 @@ export function MarketAutomationPanel({
       .map((strategy) => strategy.id));
     return activeSnapshot.executions.find((execution) => strategyIds.has(execution.strategyId)) ?? null;
   }, [activeSnapshot, market.token]);
-  const totalLimitRaw = budgetRaw;
   const budgetError = budgetRaw === null
     ? "Enter a valid amount."
     : reserveBalanceRaw !== null && budgetRaw > reserveBalanceRaw
@@ -262,7 +263,7 @@ export function MarketAutomationPanel({
   }
 
   async function execute() {
-    if (!preparation || budgetRaw === null || totalLimitRaw === null || budgetError) return;
+    if (!preparation || budgetRaw === null || budgetError) return;
     setBusy(true);
     setProgress("Connecting wallet");
     setError("");
@@ -281,6 +282,7 @@ export function MarketAutomationPanel({
         publicClient.readContract({ address: preparation.reserveToken, abi: ERC20_PERMISSION_ABI, functionName: "allowance", args: [address, currentSnapshot.executor] }),
       ]);
       if (balance < budgetRaw) throw new Error(`Not enough ${market.reserveSymbol} in this wallet.`);
+      const totalLimitRaw = balance < budgetRaw * AUTO_REPEAT_COUNT ? balance : budgetRaw * AUTO_REPEAT_COUNT;
       const validUntil = 0;
       const startCall = {
         to: currentSnapshot.executor,
@@ -349,7 +351,7 @@ export function MarketAutomationPanel({
       }
       const nextSnapshot = await refreshSettledWalletState(address, preparation);
       setMessage(executed
-        ? hasLiveMarketStrategy(nextSnapshot, market.token) ? "Executed. Watching remainder." : "Executed."
+        ? hasLiveMarketStrategy(nextSnapshot, market.token) ? "Executed. Still watching." : "Executed."
         : "Watching.");
       onPositionChange?.();
     } catch (reason) {
@@ -466,7 +468,7 @@ export function MarketAutomationPanel({
     </> : <>
       <span className="kicker">2 · Execute</span>
       <div className="market-auto-budget">
-        <label htmlFor="arbitrage-budget">Amount</label>
+        <label htmlFor="arbitrage-budget">Amount each time</label>
         <div className="market-auto-budget-input">
           <input id="arbitrage-budget" inputMode="decimal" min="0" onChange={(event) => onBudgetChange(event.target.value)} placeholder="1" step="any" type="number" value={budget} />
           <span>{market.reserveSymbol}</span>
@@ -502,8 +504,8 @@ export function MarketAutomationPanel({
           <div><strong>Profit number</strong><p>The percent comes from the current executable route after price impact, exchange fees and executor reward.</p></div>
           <div><strong>When {market.symbol} is high</strong><p>The route mints {market.symbol} in Mint Club, then sells it in the pool.</p></div>
           <div><strong>When {market.symbol} is low</strong><p>The route buys {market.symbol} in the pool, then returns it to Mint Club.</p></div>
-          <div><strong>Wallet permission</strong><p>Only the entered {market.reserveSymbol} amount is approved.</p></div>
-          <div><strong>Execution</strong><p>Clicking execute tries the trade now. If price moves, it waits.</p></div>
+          <div><strong>Wallet permission</strong><p>The wallet limit covers repeat execution. It is capped by your balance.</p></div>
+          <div><strong>Execution</strong><p>Click once. The app tries now, then keeps watching while amount remains.</p></div>
           <div><strong>Gas</strong><p>Gas coverage is checked again at execution. It is not deducted from the displayed quote.</p></div>
           <div><strong>Stop</strong><p>Stop removes the waiting position.</p></div>
         </div>

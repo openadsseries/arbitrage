@@ -52,7 +52,7 @@ Historical charts explain how the two assets moved. They do **not** decide wheth
 
 - Checks both Reserve Token round trips.
 - Lets the user enter one Reserve Token amount and execute from one action.
-- Uses that amount as both the V3 execution size and the total wallet permission.
+- Uses that amount as the per-execution size. The wallet limit is set automatically for repeat execution and capped by the connected balance.
 - Tries execution immediately; if price moves first, the route remains watchable until filled or stopped.
 - Keeps user funds in the wallet between executions.
 - Returns Reserve Token principal and protected profit atomically in every successful transaction.

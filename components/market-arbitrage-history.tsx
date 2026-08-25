@@ -193,7 +193,7 @@ export function MarketArbitrageHistory({
             <strong>{tokenAmount(execution.amountInReserveRaw, market.reserveDecimals)} {market.reserveSymbol}</strong>
             <strong>{tokenAmount(execution.amountReturnedReserveRaw, market.reserveDecimals)} {market.reserveSymbol}</strong>
             <strong className="positive">+{tokenAmount(walletProfitRaw(execution).toString(), market.reserveDecimals)} {market.reserveSymbol}</strong>
-            <strong>Done</strong>
+            <strong>Executed</strong>
             <span className="position-actions"><ExternalLink /></span>
           </a>
         ))}
