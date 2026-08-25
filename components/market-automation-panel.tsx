@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, Info, LoaderCircle, Pause, Play, ShieldCheck, X } from "lucide-react";
 import { encodeFunctionData, formatUnits, type Address } from "viem";
 import { useWallet } from "@/components/wallet-provider";
@@ -27,21 +27,11 @@ type Preparation = {
   reserveSymbol: string;
   readBlock: string;
 };
-type DirectExecution = {
-  executor: Address;
-  strategyId: string;
-  direction: 0 | 1;
-  params: {
-    amountInReserve: string;
-    hAmountForMint: string;
-    minimumWethOut: string;
-    minimumHypedOut: string;
-    minimumBondOut: string;
-    minimumReserveOut: string;
-  };
-};
 
 const AUTO_REPEAT_COUNT = 10n;
+const WATCH_VISIBLE_MS = 30_000;
+const WATCH_HIDDEN_MS = 120_000;
+const RELAY_COOLDOWN_MS = 12_000;
 
 function reserveAmount(raw: string, decimals: number) {
   return Number(formatUnits(BigInt(raw), decimals)).toLocaleString("en-US", { maximumFractionDigits: 8 });
@@ -93,6 +83,8 @@ export function MarketAutomationPanel({
   const [watchReason, setWatchReason] = useState("");
   const [showRevoke, setShowRevoke] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const relayInFlight = useRef(false);
+  const relayCooldownUntil = useRef(0);
 
   const readSnapshot = useCallback(async (address: Address) => {
     const response = await fetch(`/api/arbitrage/v3?wallet=${address}`, { cache: "no-store" });
@@ -227,67 +219,54 @@ export function MarketAutomationPanel({
     };
   }, [preparation, refreshWalletState, running, wallet.address]);
 
-  useEffect(() => {
-    if (!wallet.address || !activeSnapshot?.executor || !running) {
-      return;
-    }
-    let active = true;
-    const check = async () => {
-      const response = await fetch("/api/arbitrage/execute", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ owner: wallet.address, strategyId: running.id }),
-      });
-      const payload = await response.json() as { error?: string };
-      if (active) setWatchReason(response.ok ? "" : payload.error ?? "Watching.");
-    };
-    void check().catch((reason) => {
-      if (active) setWatchReason(errorMessage(reason, "Watching."));
-    });
-    const interval = window.setInterval(() => {
-      void check().catch(() => undefined);
-    }, 30_000);
-    return () => {
-      active = false;
-      window.clearInterval(interval);
-    };
-  }, [activeSnapshot?.executor, running, wallet.address]);
-
-  async function executeStrategyNow(address: Address, strategyId: bigint, executor: Address) {
-    setProgress("Quote");
-    const response = await fetch("/api/arbitrage/execute", {
+  const relayStrategy = useCallback(async (address: Address, strategyId: string) => {
+    const response = await fetch("/api/arbitrage/relay", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ owner: address, strategyId: strategyId.toString() }),
+      body: JSON.stringify({ owner: address, strategyId }),
     });
-    const payload = await response.json() as { execution?: DirectExecution; error?: string };
-    if (!response.ok || !payload.execution) throw new Error(payload.error ?? "Not executable now.");
-    const execution = payload.execution;
-    const publicClient = await wallet.getPublicClient("base");
-    const walletClient = await wallet.getWalletClient("base");
-    setProgress("Execute");
-    const request = await publicClient.simulateContract({
-      account: address,
-      address: executor,
-      abi: ARBITRAGE_EXECUTOR_V3_ABI,
-      functionName: "execute",
-      args: [
-        BigInt(execution.strategyId),
-        execution.direction,
-        {
-          amountInReserve: BigInt(execution.params.amountInReserve),
-          hAmountForMint: BigInt(execution.params.hAmountForMint),
-          minimumWethOut: BigInt(execution.params.minimumWethOut),
-          minimumHypedOut: BigInt(execution.params.minimumHypedOut),
-          minimumBondOut: BigInt(execution.params.minimumBondOut),
-          minimumReserveOut: BigInt(execution.params.minimumReserveOut),
-        },
-      ],
-    });
-    const hash = await walletClient.writeContract(request.request);
-    const receipt = await publicClient.waitForTransactionReceipt({ hash });
-    if (receipt.status !== "success") throw new Error("Execution failed.");
-  }
+    const payload = await response.json() as { hash?: `0x${string}`; error?: string };
+    if (!response.ok || !payload.hash) throw new Error(payload.error ?? "Watching.");
+    return payload.hash;
+  }, []);
+
+  useEffect(() => {
+    if (!wallet.address || !activeSnapshot?.executor || !running) return;
+    let active = true;
+    let timeout: number | undefined;
+    const run = async () => {
+      if (!active) return;
+      if (relayInFlight.current || Date.now() < relayCooldownUntil.current) {
+        schedule();
+        return;
+      }
+      relayInFlight.current = true;
+      try {
+        await relayStrategy(wallet.address!, running.id);
+        relayCooldownUntil.current = Date.now() + RELAY_COOLDOWN_MS;
+        if (!active) return;
+        setWatchReason("");
+        setMessage("Executed. Still watching.");
+        await refreshSettledWalletState(wallet.address!, preparation);
+        onPositionChange?.();
+      } catch (reason) {
+        if (active) setWatchReason(errorMessage(reason, "Watching."));
+      } finally {
+        relayInFlight.current = false;
+        schedule();
+      }
+    };
+    const schedule = () => {
+      if (!active) return;
+      const delay = document.visibilityState === "visible" ? WATCH_VISIBLE_MS : WATCH_HIDDEN_MS;
+      timeout = window.setTimeout(() => void run(), delay);
+    };
+    void run();
+    return () => {
+      active = false;
+      if (timeout) window.clearTimeout(timeout);
+    };
+  }, [activeSnapshot?.executor, onPositionChange, preparation, refreshSettledWalletState, relayStrategy, running, wallet.address]);
 
   async function execute() {
     if (!preparation || budgetRaw === null || budgetError) return;
@@ -372,12 +351,14 @@ export function MarketAutomationPanel({
       if (strategyId === 0n) throw new Error("Position not found.");
       let executed = false;
       try {
-        await executeStrategyNow(address, strategyId, currentSnapshot.executor);
+        setProgress("Execute");
+        await relayStrategy(address, strategyId.toString());
+        relayCooldownUntil.current = Date.now() + RELAY_COOLDOWN_MS;
         executed = true;
       } catch (reason) {
-        const text = errorMessage(reason, "No route now.");
+        const text = errorMessage(reason, "Watching.");
         setWatchReason(text);
-        if (text !== "Waiting for gas.") setError(text);
+        if (text !== "Waiting for gas." && text !== "Not executable now.") setError(text);
       }
       const nextSnapshot = await refreshSettledWalletState(address, preparation);
       setMessage(executed
@@ -486,8 +467,8 @@ export function MarketAutomationPanel({
 
   return <section className="market-auto-panel">
     {running ? <>
-      <div className="market-auto-status"><span><i /> Watching</span><small>{watchReason || "Automatic"}</small></div>
-      <h2>{watchReason === "Waiting for gas." ? "Waiting for gas." : "Watching prices."}</h2>
+      <div className="market-auto-status"><span><i /> Watching</span><small>{watchReason || "This browser"}</small></div>
+      <h2>{watchReason === "Waiting for gas." ? "Waiting for gas to drop." : "Watching prices."}</h2>
       <dl className="market-auto-summary">
         <div><dt>Profit</dt><dd className="positive">+{reserveAmount(totalProfitRaw.toString(), market.reserveDecimals)} {market.reserveSymbol}</dd></div>
         <div><dt>Runs</dt><dd>{running.executionCount}</dd></div>

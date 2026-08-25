@@ -1,7 +1,7 @@
 import "server-only";
 
 import { BOND_ABI, binaryReverseMint, mintclub } from "@mint.club/v2-sdk";
-import { getAddress, parseAbi, type Address } from "viem";
+import { getAddress, parseAbi, type Address, type PublicClient } from "viem";
 import {
   ARBITRAGE_EXECUTOR_V3_ABI,
   ERC20_PERMISSION_ABI,
@@ -50,6 +50,7 @@ type Candidate = {
     minimumReserveOut: bigint;
   };
 };
+type ArbitrageClient = Pick<PublicClient, "estimateContractGas" | "getBlock" | "getGasPrice" | "readContract" | "simulateContract">;
 
 function down(amount: bigint) {
   return amount * (BPS - SLIPPAGE_BPS) / BPS;
@@ -62,9 +63,8 @@ function profitParts(grossProfit: bigint, protocolFeeBps: number, rewardBps: num
   return { executorReward, ownerProfit, walletProfit: ownerProfit + executorReward };
 }
 
-async function quoteExactInput(tokenIn: Address, tokenOut: Address, amountIn: bigint) {
+async function quoteExactInput(client: ArbitrageClient, tokenIn: Address, tokenOut: Address, amountIn: bigint) {
   if (amountIn <= 0n) throw new Error("No route.");
-  const client = mintclub.network("base").getPublicClient();
   const quote = await client.readContract({
     address: ONCHAIN_ROUTER,
     abi: ROUTER_ABI,
@@ -76,8 +76,7 @@ async function quoteExactInput(tokenIn: Address, tokenOut: Address, amountIn: bi
   return quote.amountOut;
 }
 
-async function readBondState(strategy: Strategy) {
-  const client = mintclub.network("base").getPublicClient();
+async function readBondState(strategy: Strategy, client: ArbitrageClient) {
   const [steps, currentSupply, maxSupply, decimals, bond] = await Promise.all([
     client.readContract({ address: CHAINS.base.mintClubBond, abi: BOND_ABI, functionName: "getSteps", args: [strategy.hToken], blockTag: "pending" }),
     client.readContract({ address: strategy.hToken, abi: ERC20_META_ABI, functionName: "totalSupply", blockTag: "pending" }),
@@ -90,6 +89,7 @@ async function readBondState(strategy: Strategy) {
 }
 
 async function mintThenSell(
+  client: ArbitrageClient,
   strategy: Strategy,
   budget: bigint,
   bondState: Awaited<ReturnType<typeof readBondState>>,
@@ -106,7 +106,6 @@ async function mintThenSell(
     slippage: 0,
   });
   if (hAmount <= 0n) return null;
-  const client = mintclub.network("base").getPublicClient();
   const [reserveRequired] = await client.readContract({
     address: CHAINS.base.mintClubBond,
     abi: BOND_ABI,
@@ -115,8 +114,8 @@ async function mintThenSell(
     blockTag: "pending",
   });
   if (reserveRequired <= 0n || reserveRequired > budget) return null;
-  const wethOut = await quoteExactInput(strategy.hToken, CHAINS.base.weth, hAmount);
-  const reserveOut = await quoteExactInput(CHAINS.base.weth, strategy.reserveToken, wethOut);
+  const wethOut = await quoteExactInput(client, strategy.hToken, CHAINS.base.weth, hAmount);
+  const reserveOut = await quoteExactInput(client, CHAINS.base.weth, strategy.reserveToken, wethOut);
   if (reserveOut <= reserveRequired) return null;
   const parts = profitParts(reserveOut - reserveRequired, protocolFeeBps, rewardBps);
   if (parts.ownerProfit < strategy.minProfitReserve) return null;
@@ -139,14 +138,14 @@ async function mintThenSell(
 }
 
 async function buyThenRedeem(
+  client: ArbitrageClient,
   strategy: Strategy,
   budget: bigint,
   protocolFeeBps: number,
   rewardBps: number,
 ): Promise<Candidate | null> {
-  const wethOut = await quoteExactInput(strategy.reserveToken, CHAINS.base.weth, budget);
-  const hOut = await quoteExactInput(CHAINS.base.weth, strategy.hToken, wethOut);
-  const client = mintclub.network("base").getPublicClient();
+  const wethOut = await quoteExactInput(client, strategy.reserveToken, CHAINS.base.weth, budget);
+  const hOut = await quoteExactInput(client, CHAINS.base.weth, strategy.hToken, wethOut);
   const [reserveOut] = await client.readContract({
     address: CHAINS.base.mintClubBond,
     abi: BOND_ABI,
@@ -178,13 +177,16 @@ async function buyThenRedeem(
 export async function buildDirectArbitrageExecution({
   owner,
   strategyId,
+  executionAccount = owner,
+  client = mintclub.network("base").getPublicClient() as unknown as ArbitrageClient,
 }: {
   owner: Address;
   strategyId: bigint;
+  executionAccount?: Address;
+  client?: ArbitrageClient;
 }) {
   const executor = getArbitrageExecutorV3("base");
   if (!executor) throw new Error("Arbitrage is not configured.");
-  const client = mintclub.network("base").getPublicClient();
   const [rawStrategy, block, protocolFeeBps, rewardBps] = await Promise.all([
     client.readContract({ address: executor, abi: ARBITRAGE_EXECUTOR_V3_ABI, functionName: "strategies", args: [strategyId], blockTag: "pending" }),
     client.getBlock({ blockTag: "pending" }),
@@ -224,11 +226,11 @@ export async function buildDirectArbitrageExecution({
   const available = [strategy.maxReserve, strategy.remainingVolume, balance, allowance].reduce((left, right) => left < right ? left : right);
   if (available <= 0n) throw new Error("No available amount.");
 
-  const bondState = await readBondState(strategy);
+  const bondState = await readBondState(strategy, client);
   const budgets = getArbitrageCurveAmounts(available);
   const candidates = (await Promise.all(budgets.flatMap((budget) => [
-    mintThenSell(strategy, budget, bondState, Number(protocolFeeBps), Number(rewardBps)).catch(() => null),
-    buyThenRedeem(strategy, budget, Number(protocolFeeBps), Number(rewardBps)).catch(() => null),
+    mintThenSell(client, strategy, budget, bondState, Number(protocolFeeBps), Number(rewardBps)).catch(() => null),
+    buyThenRedeem(client, strategy, budget, Number(protocolFeeBps), Number(rewardBps)).catch(() => null),
   ]))).filter((candidate): candidate is Candidate => Boolean(candidate))
     .sort((left, right) => left.walletProfit > right.walletProfit ? -1 : left.walletProfit < right.walletProfit ? 1 : 0);
 
@@ -236,7 +238,7 @@ export async function buildDirectArbitrageExecution({
   for (const candidate of candidates) {
     try {
       const simulation = await client.simulateContract({
-        account: owner,
+        account: executionAccount,
         address: executor,
         abi: ARBITRAGE_EXECUTOR_V3_ABI,
         functionName: "execute",
@@ -244,9 +246,9 @@ export async function buildDirectArbitrageExecution({
         blockTag: "pending",
       });
       const [gas, gasPrice, rewardWeth] = await Promise.all([
-        client.estimateContractGas({ ...simulation.request, account: owner, blockTag: "pending" }),
+        client.estimateContractGas({ ...simulation.request, account: executionAccount, blockTag: "pending" }),
         client.getGasPrice(),
-        quoteExactInput(strategy.reserveToken, CHAINS.base.weth, candidate.executorReward).catch(() => 0n),
+        quoteExactInput(client, strategy.reserveToken, CHAINS.base.weth, candidate.executorReward).catch(() => 0n),
       ]);
       const requiredWeth = gas * gasPrice * GAS_MARGIN_BPS / BPS;
       if (rewardWeth < requiredWeth) {

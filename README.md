@@ -164,6 +164,7 @@ NEXT_PUBLIC_ARBITRAGE_EXECUTOR_V3=0xbB7AF71818fD1a269f21D0b5E4d8F7CF5401Ac3C
 ARBITRAGE_EXECUTOR_V3_DEPLOYMENT_BLOCK=50422622
 BASE_RPC_URL=
 ROBINHOOD_RPC_URL=
+ARBITRAGE_RELAYER_PRIVATE_KEY=
 ```
 
 `UNISWAP_API_KEY` and RPC credentials are server-only. `UNISWAP_FEE_RECIPIENT` must be a reviewed project-controlled address.
@@ -176,6 +177,18 @@ ARBITRAGE_EXECUTOR_V2_DEPLOYMENT_BLOCK=
 NEXT_PUBLIC_ARBITRAGE_EXECUTOR=
 ARBITRAGE_EXECUTOR_DEPLOYMENT_BLOCK=
 ```
+
+### Browser relay
+
+Users click once, then the open browser tab watches the active position. When the route is executable, Vercel sends the transaction through a gas-only relay wallet.
+
+```text
+ARBITRAGE_RELAYER_PRIVATE_KEY=
+BASE_RPC_URL=
+NEXT_PUBLIC_ARBITRAGE_EXECUTOR_V3=0xbB7AF71818fD1a269f21D0b5E4d8F7CF5401Ac3C
+```
+
+Keep the relay wallet funded only for Base gas. The relay cannot move funds beyond the user-approved strategy limits.
 
 ### Persistent keeper only
 
