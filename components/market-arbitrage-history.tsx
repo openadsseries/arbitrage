@@ -173,11 +173,11 @@ export function MarketArbitrageHistory({
               <Image src={tokenLogoUrl(market.token, CHAINS.base.id)} alt="" width={34} height={34} unoptimized />
               <span><strong>Watching</strong><small>#{activeStrategy.id}</small></span>
             </div>
-            <strong>{tokenAmount(activeStrategy.remainingVolumeRaw, market.reserveDecimals)} {market.reserveSymbol}</strong>
+            <strong>{tokenAmount(activeStrategy.maxReservePerExecutionRaw, market.reserveDecimals)} {market.reserveSymbol}</strong>
             <strong>—</strong>
             <strong className="positive">+{tokenAmount(activePnlRaw.toString(), market.reserveDecimals)} {market.reserveSymbol}</strong>
             <strong>{activeStrategy.executionCount}</strong>
-            <strong>Waiting</strong>
+            <strong>{tokenAmount(activeStrategy.remainingVolumeRaw, market.reserveDecimals)} left</strong>
             <div className="position-actions">
               <button disabled={Boolean(busy)} onClick={() => void stop(activeStrategy)} type="button">
                 {busy === activeStrategy.id ? <LoaderCircle className="spin" /> : <Pause />} Stop
