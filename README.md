@@ -52,12 +52,13 @@ Historical charts explain how the two assets moved. They do **not** decide wheth
 
 - Checks both Reserve Token round trips.
 - Lets the user enter one Reserve Token amount and execute from one action.
-- Uses that amount as the per-execution size. The wallet limit is set automatically for repeat execution and capped by the connected balance.
-- Tries execution immediately; if price moves first, the route remains watchable until filled or stopped.
-- Keeps user funds in the wallet between executions.
-- Returns Reserve Token principal and protected profit atomically in every successful transaction.
-- Reverts the complete transaction when the protected result cannot be returned.
-- Lets the user stop the strategy and remove the remaining token permission.
+- Uses that amount for each run.
+- Sets the repeat limit automatically, capped by wallet balance.
+- Tries now, then keeps watching.
+- Keeps funds in the wallet between runs.
+- Returns principal and profit in the Reserve Token.
+- Reverts if the protected return is not met.
+- Lets the user stop and remove permission.
 
 The current immutable fee policy is:
 

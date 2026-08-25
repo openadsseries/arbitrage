@@ -14,13 +14,13 @@ export function compactActionError(reason: unknown, fallback: string) {
   for (const candidate of candidates) {
     if (typeof candidate !== "string" || !candidate.trim()) continue;
     const message = candidate.trim();
-    if (/user denied|user rejected|request signature/i.test(message)) return "Wallet approval was cancelled.";
+    if (/user denied|user rejected|request signature/i.test(message)) return "Wallet cancelled.";
     if (/over rate limit|rate.?limit|too many requests|429|defined limit|base rpc is busy/i.test(message)) {
-      return "Base RPC is busy. Wait a moment and try again.";
+      return "Base is busy. Try again soon.";
     }
-    if (/not executable now/i.test(message)) return "Not executable now.";
+    if (/not executable now/i.test(message)) return "No route now.";
     if (/rpc request failed|http request failed|failed to fetch|network request|raw call arguments|contract call|request body|url:/i.test(message)) {
-      return "The Base read was interrupted. Try again.";
+      return "Base read failed. Try again.";
     }
     if (message.length <= 180) return message;
   }

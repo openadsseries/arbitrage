@@ -72,7 +72,7 @@
 - Keep the pair header to the token pair and the single three-part view toggle. Remove repeated network, product-proposition, normalization, fee and gas helper sentences from the primary surface; retain necessary disclosures in source links or the existing settings accordions.
 - Align `1. Check profit` with the action panel step label. Keep the live percentage as the only large result in that header.
 - Label the route `Arbitrage path`. Display the visual path as seven equal slots including arrows: Reserve Token amount, arrow, Hyped Token, arrow, swap, arrow, returned Reserve Token amount. Keep explanatory text in `Details`.
-- Give the primary authorization form one editable Reserve Token amount and one `Execute arbitrage` action. Treat the amount as the per-execution size, set the repeat limit automatically, and after signing show only `Watching` and `Stop`. Direction, route and cumulative limits remain execution details, not user inputs.
+- Give the primary form one Reserve Token amount and one `Execute arbitrage` action. Treat the amount as the per-run size, set the repeat limit automatically, and after signing show only `Watching` and `Stop`.
 - Read the connected wallet's actual Reserve Token balance and permission. State this beneath the amount without introducing a separate asset selector.
 - Put route protection, costs and permissions in one collapsed `Details` disclosure so supporting text never competes with the primary action or overflows the action stage.
 - Use whitespace as state capacity, not as a prompt to add permanent copy. A thin leader line may connect the price-check step to its result; the lower comparison area remains empty until a real execution can show its used amount, return, profit and transaction link; the lower action area is reserved for open settings and post-authorization controls.
@@ -92,9 +92,9 @@
 - Market detail is the primary place to authorize arbitrage; Portfolio is where authorizations and realized profit history are managed.
 - `Arbitrage` is available only when both tokens have an executable Uniswap route and the Base executor is live. Protocol versions stay hidden from the primary action. Never imply that a profitable opportunity currently exists merely because a route is eligible.
 - Market discovery is background verification, never a user-facing destination. A registered eligible market opens directly on `Join arbitrage`; do not show `Checking` or `Market found` as terminal states.
-- Keep the primary Arbitrage form free of settings beyond its Reserve Token amount. One authorization grants only the entered Reserve Token permission, uses the V3 executor, and requires an amount-scaled positive protected profit. WETH is an internal routing asset, never the user's accounting unit. Keep the two route directions and the 20% successful-executor reward in `Details`.
+- Keep the primary Arbitrage form free of settings beyond its Reserve Token amount. The amount is the per-run size; the repeat limit is automatic and capped by wallet balance. WETH is internal only. Keep route details in `Details`.
 - Wallet confirmations remain explicit security boundaries. One product action may guide the user through required wallet confirmations, but the interface must never imply that signatures can be bypassed.
-- After activation, replace the form in place with `Authorized`, the amount left and one `Stop` action. Never expose end-time or cumulative-limit controls on the primary surface. A successful execution ends the authorization automatically when the entered amount is consumed. Stopping before execution is one wallet action; removing the remaining token permission is a separate optional safety action.
+- After activation, replace the form with `Watching`, amount left and one `Stop` action. Never expose end-time or cumulative-limit controls on the primary surface.
 - Use `Arbitrage` in primary copy. Explain it as comparing two executable routes across the OG market, Mint Club conversion, and Hyped Token pool. Reserve `keeper`, `allowance`, and low-level route internals for supporting disclosures.
 
 ## Pool creation pricing

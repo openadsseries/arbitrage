@@ -456,11 +456,11 @@ export function MarketAutomationPanel({
   return <section className="market-auto-panel">
     {running ? <>
       <div className="market-auto-status"><span><i /> Watching</span><small>Automatic</small></div>
-      <h2>Waiting for price.</h2>
+      <h2>Watching prices.</h2>
       <dl className="market-auto-summary">
-        <div><dt>Total profit</dt><dd className="positive">+{reserveAmount(totalProfitRaw.toString(), market.reserveDecimals)} {market.reserveSymbol}</dd></div>
-        <div><dt>Executions</dt><dd>{running.executionCount}</dd></div>
-        <div><dt>Amount left</dt><dd>{reserveAmount(running.remainingVolumeRaw, market.reserveDecimals)} {market.reserveSymbol}</dd></div>
+        <div><dt>Profit</dt><dd className="positive">+{reserveAmount(totalProfitRaw.toString(), market.reserveDecimals)} {market.reserveSymbol}</dd></div>
+        <div><dt>Runs</dt><dd>{running.executionCount}</dd></div>
+        <div><dt>Left</dt><dd>{reserveAmount(running.remainingVolumeRaw, market.reserveDecimals)} {market.reserveSymbol}</dd></div>
       </dl>
       <div className="market-auto-actions">
         <button className="market-auto-stop" disabled={busy} onClick={() => void stopAndRevoke()} type="button">{busy ? <LoaderCircle className="spin" /> : <Pause />} Stop</button>
@@ -479,7 +479,7 @@ export function MarketAutomationPanel({
             <dd>{wallet.address && reserveBalanceRaw !== null ? `${reserveAmount(reserveBalanceRaw.toString(), market.reserveDecimals)} ${market.reserveSymbol}` : "Connect wallet"}</dd>
           </div>
           <div>
-            <dt>Estimated profit</dt>
+            <dt>Est. profit</dt>
             <dd className={estimatedProfitRaw ? "positive" : ""}>{estimatedProfitRaw ? `+${reserveAmount(estimatedProfitRaw, market.reserveDecimals)} ${market.reserveSymbol}` : "—"}</dd>
           </div>
         </dl>
@@ -492,26 +492,26 @@ export function MarketAutomationPanel({
 
     {message && <div className="market-auto-message"><CheckCircle2 /> {message}</div>}
     {error && <div className="market-auto-error"><ShieldCheck /> {error}</div>}
-    {(showRevoke || permissionRemaining) && !running && <button className="market-auto-revoke" disabled={busy} onClick={() => void revoke()} type="button">Remove remaining permission</button>}
+    {(showRevoke || permissionRemaining) && !running && <button className="market-auto-revoke" disabled={busy} onClick={() => void revoke()} type="button">Remove permission</button>}
     <button className="market-details-trigger" onClick={() => setDetailsOpen(true)} type="button"><Info /> Details</button>
     {detailsOpen && <div className="market-details-layer" role="presentation" onMouseDown={() => setDetailsOpen(false)}>
       <section className="market-details-dialog" aria-label="Arbitrage details" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
         <button className="market-details-close" aria-label="Close details" onClick={() => setDetailsOpen(false)} type="button"><X /></button>
         <span className="kicker">Details</span>
-        <h2>Arbitrage checks</h2>
+        <h2>Checks</h2>
         <div className="market-details-grid">
-          <div><strong>Price movement</strong><p>The chart uses daily USD closes. A wider gap only triggers a live route check.</p></div>
-          <div><strong>Profit number</strong><p>The percent comes from the current executable route after price impact, exchange fees and executor reward.</p></div>
-          <div><strong>When {market.symbol} is high</strong><p>The route mints {market.symbol} in Mint Club, then sells it in the pool.</p></div>
-          <div><strong>When {market.symbol} is low</strong><p>The route buys {market.symbol} in the pool, then returns it to Mint Club.</p></div>
-          <div><strong>Wallet permission</strong><p>The wallet limit covers repeat execution. It is capped by your balance.</p></div>
-          <div><strong>Execution</strong><p>Click once. The app tries now, then keeps watching while amount remains.</p></div>
-          <div><strong>Gas</strong><p>Gas coverage is checked again at execution. It is not deducted from the displayed quote.</p></div>
-          <div><strong>Stop</strong><p>Stop removes the waiting position.</p></div>
+          <div><strong>Chart</strong><p>Daily USD prices.</p></div>
+          <div><strong>Profit</strong><p>Live route after fees.</p></div>
+          <div><strong>{market.symbol} high</strong><p>Mint, then sell.</p></div>
+          <div><strong>{market.symbol} low</strong><p>Buy, then redeem.</p></div>
+          <div><strong>Permission</strong><p>Covers repeats. Capped by balance.</p></div>
+          <div><strong>Execution</strong><p>Click once. Then it watches.</p></div>
+          <div><strong>Gas</strong><p>Checked before each run.</p></div>
+          <div><strong>Stop</strong><p>Stops and removes permission.</p></div>
         </div>
         <dl>
           <div><dt>GETHYPED fee</dt><dd>{(activeSnapshot?.protocolFeeBps ?? 0) / 100}%</dd></div>
-          <div><dt>Successful executor</dt><dd>{(activeSnapshot?.executorRewardBps ?? 2_000) / 100}% of profit</dd></div>
+          <div><dt>Executor</dt><dd>{(activeSnapshot?.executorRewardBps ?? 2_000) / 100}% of profit</dd></div>
           <div><dt>User share</dt><dd>{100 - (activeSnapshot?.protocolFeeBps ?? 0) / 100 - (activeSnapshot?.executorRewardBps ?? 2_000) / 100}% of profit</dd></div>
           {activeSnapshot?.executor && <div><dt>Executor</dt><dd>{shortAddress(activeSnapshot.executor)}</dd></div>}
         </dl>
