@@ -256,6 +256,7 @@ export type DirectArbitrageExecutionQuote = {
   simulatedOwnerReturnRaw: string;
   gasRaw: string;
   gasPriceRaw: string;
+  totalFeeWethRaw: string;
   rewardWethRaw: string;
   requiredWethRaw: string;
   reserveUsd?: number | null;

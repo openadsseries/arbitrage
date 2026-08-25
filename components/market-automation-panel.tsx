@@ -46,7 +46,6 @@ class RelayRequestError extends Error {
   }
 }
 
-const AUTO_REPEAT_COUNT = 10n;
 const WATCH_VISIBLE_MS = 30_000;
 const WATCH_HIDDEN_MS = 120_000;
 const RELAY_COOLDOWN_MS = 12_000;
@@ -333,7 +332,7 @@ export function MarketAutomationPanel({
         publicClient.readContract({ address: preparation.reserveToken, abi: ERC20_PERMISSION_ABI, functionName: "allowance", args: [address, currentSnapshot.executor] }),
       ]);
       if (balance < budgetRaw) throw new Error(`Not enough ${market.reserveSymbol} in this wallet.`);
-      const totalLimitRaw = balance < budgetRaw * AUTO_REPEAT_COUNT ? balance : budgetRaw * AUTO_REPEAT_COUNT;
+      const totalLimitRaw = budgetRaw;
       const validUntil = 0;
       const startCall = {
         to: currentSnapshot.executor,
@@ -533,7 +532,7 @@ export function MarketAutomationPanel({
     </> : <>
       <span className="kicker">2 · Execute</span>
       <div className="market-auto-budget">
-        <label htmlFor="arbitrage-budget">Amount each time</label>
+        <label htmlFor="arbitrage-budget">Total amount</label>
         <div className="market-auto-budget-input">
           <input id="arbitrage-budget" inputMode="decimal" min="0" onChange={(event) => onBudgetChange(event.target.value)} placeholder="1" step="any" type="number" value={budget} />
           <span>{market.reserveSymbol}</span>

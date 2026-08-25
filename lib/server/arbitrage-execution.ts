@@ -1,7 +1,9 @@
 import "server-only";
 
 import { BOND_ABI, binaryReverseMint, mintclub } from "@mint.club/v2-sdk";
-import { getAddress, parseAbi, type Address, type PublicClient } from "viem";
+import { getAddress, parseAbi, type Address, type PublicClient, type Transport } from "viem";
+import { base } from "viem/chains";
+import { estimateContractTotalFee } from "viem/op-stack";
 import {
   ARBITRAGE_EXECUTOR_V3_ABI,
   ERC20_PERMISSION_ABI,
@@ -279,12 +281,19 @@ export async function readDirectArbitrageExecutionStatus({
         args: [strategyId, candidate.direction, candidate.params],
         blockTag: "pending",
       });
-      const [gas, gasPrice, rewardWeth] = await Promise.all([
+      const [gas, gasPrice, totalFee, rewardWeth] = await Promise.all([
         client.estimateContractGas({ ...simulation.request, account: executionAccount, blockTag: "pending" }),
         client.getGasPrice(),
+        estimateContractTotalFee(client as PublicClient<Transport, typeof base>, {
+          account: executionAccount,
+          address: executor,
+          abi: ARBITRAGE_EXECUTOR_V3_ABI,
+          functionName: "execute",
+          args: [strategyId, candidate.direction, candidate.params],
+        }),
         quoteExactInput(client, strategy.reserveToken, CHAINS.base.weth, candidate.executorReward).catch(() => 0n),
       ]);
-      const requiredWeth = gas * gasPrice * GAS_MARGIN_BPS / BPS;
+      const requiredWeth = totalFee * GAS_MARGIN_BPS / BPS;
       const execution: DirectArbitrageExecutionQuote = {
         executor,
         strategyId: strategyId.toString(),
@@ -298,6 +307,7 @@ export async function readDirectArbitrageExecutionStatus({
         simulatedOwnerReturnRaw: simulation.result.toString(),
         gasRaw: gas.toString(),
         gasPriceRaw: gasPrice.toString(),
+        totalFeeWethRaw: totalFee.toString(),
         rewardWethRaw: rewardWeth.toString(),
         requiredWethRaw: requiredWeth.toString(),
       };
