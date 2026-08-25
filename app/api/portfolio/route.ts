@@ -21,7 +21,6 @@ export async function GET(request: Request) {
     const results = await Promise.allSettled(chains.map((chain) => readPortfolio(chain, wallet)));
     const portfolios = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
     const unavailableChains = chains.filter((_, index) => results[index].status === "rejected");
-    if (portfolios.length === 0) throw new Error("Could not read portfolio from supported networks.");
     return NextResponse.json({ portfolios, unavailableChains, source: "Wallet balances, Mint Club and confirmed events" });
   } catch (error) {
     return NextResponse.json(

@@ -3,13 +3,13 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, ExternalLink, LoaderCircle, WalletCards } from "lucide-react";
+import { ArrowRight, ExternalLink, WalletCards } from "lucide-react";
 import { formatUnits } from "viem";
 import { ChainBadge } from "@/components/chain-badge";
 import { ArbitragePortfolio } from "@/components/arbitrage-portfolio";
 import { tokenLogoUrl } from "@/components/token-logo";
 import { useWallet } from "@/components/wallet-provider";
-import { CHAINS, type ChainKey } from "@/lib/chains";
+import { CHAINS } from "@/lib/chains";
 import { compact } from "@/lib/format";
 import type { PortfolioSnapshot } from "@/lib/onchain-types";
 
@@ -25,37 +25,26 @@ export function PortfolioView() {
   const [snapshots, setSnapshots] = useState<PortfolioSnapshot[]>([]);
   const [arbitrageMarkets, setArbitrageMarkets] = useState<PortfolioSnapshot["launches"]>([]);
   const [arbitrageBusy, setArbitrageBusy] = useState(true);
-  const [unavailableChains, setUnavailableChains] = useState<ChainKey[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
 
   useEffect(() => {
     if (!address) {
       // Wallet disconnection invalidates the external account snapshot immediately.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setSnapshots([]);
-      setUnavailableChains([]);
-      setError("");
       return;
     }
     const controller = new AbortController();
-    setBusy(true);
-    setError("");
     fetch(`/api/portfolio?wallet=${address}`, { signal: controller.signal })
       .then(async (response) => {
-        const payload = await response.json() as { portfolios?: PortfolioSnapshot[]; unavailableChains?: ChainKey[]; error?: string };
+        const payload = await response.json() as { portfolios?: PortfolioSnapshot[]; error?: string };
         if (!response.ok || !payload.portfolios) throw new Error(payload.error ?? "Could not read portfolio.");
         setSnapshots(payload.portfolios);
-        setUnavailableChains(payload.unavailableChains ?? []);
       })
       .catch((reason) => {
         if (!(reason instanceof DOMException && reason.name === "AbortError")) {
-          setError(reason instanceof Error ? reason.message : "Could not read portfolio.");
+          setSnapshots([]);
         }
       })
-      .finally(() => {
-        if (!controller.signal.aborted) setBusy(false);
-      });
     return () => controller.abort();
   }, [address]);
 
@@ -70,7 +59,7 @@ export function PortfolioView() {
       })
       .catch((reason) => {
         if (!(reason instanceof DOMException && reason.name === "AbortError")) {
-          setError(reason instanceof Error ? reason.message : "Could not read arbitrage markets.");
+          setArbitrageMarkets([]);
         }
       })
       .finally(() => {
@@ -103,36 +92,30 @@ export function PortfolioView() {
       {!address ? (
         <div className="empty-state compact portfolio-empty"><WalletCards /><h2>Connect wallet</h2><button className="button-primary" onClick={() => void connect()} type="button">Connect wallet</button></div>
       ) : tab === "arbitrage" ? (
-        arbitrageBusy && arbitrageMarkets.length === 0
-          ? <div className="empty-state compact"><LoaderCircle className="spin" /><h2>Loading</h2></div>
-          : <ArbitragePortfolio wallet={address} markets={arbitrageMarketCatalog} />
-      ) : busy ? (
-        <div className="empty-state compact"><LoaderCircle className="spin" /><h2>Loading</h2></div>
-      ) : error ? (
-        <div className="alert danger"><WalletCards /><div><strong>Could not load</strong><p>{error}</p></div></div>
-      ) : snapshots.length ? (
+        <ArbitragePortfolio wallet={address} markets={arbitrageBusy && arbitrageMarkets.length === 0 ? launches : arbitrageMarketCatalog} />
+      ) : (
         <>
-          {unavailableChains.length > 0 && <p className="partial-note">Some networks are unavailable.</p>}
           {tab === "positions" && (
-            positions.length ? <div className="position-grid">{positions.map((position) => (
-              <article className="position-card" key={`${position.market.chain}-${position.market.token}`}>
-                <div className="position-head">
-                  <span><span className="token-chain-logo"><Image src={tokenLogoUrl(position.market.token, position.market.chain === "base" ? 8453 : 4663)} alt="" width={42} height={42} unoptimized /><ChainBadge chain={position.market.chain} /></span><b>{position.market.symbol}<small>{position.market.name}</small></b></span>
-                  <Link href={`/market/${position.market.chain}/${position.market.token}`} aria-label={`Open ${position.market.symbol}`}><ArrowRight /></Link>
-                </div>
-                <dl>
-                  <div><dt>Balance</dt><dd>{amount(position.balanceRaw, position.market.decimals)} {position.market.symbol}</dd></div>
-                  <div><dt>Return</dt><dd>{amount(position.redeemableRaw, position.market.reserveDecimals)} {position.market.reserveSymbol}</dd></div>
-                  <div><dt>Fee</dt><dd>{amount(position.burnRoyaltyRaw, position.market.reserveDecimals)} {position.market.reserveSymbol}</dd></div>
-                </dl>
-              </article>
-            ))}</div> : <EmptyPortfolio title="No assets" />
+            <section className="portfolio-section">
+              <div className="portfolio-table assets-table">
+                <div className="portfolio-table-head" aria-hidden="true"><span>Asset</span><span>Balance</span><span>Return</span><span>Fee</span><span>Action</span></div>
+                {positions.length ? positions.map((position) => (
+                  <Link className="portfolio-row" href={`/market/${position.market.chain}/${position.market.token}`} key={`${position.market.chain}-${position.market.token}`} aria-label={`Open ${position.market.symbol}`}>
+                    <div className="portfolio-market"><span className="token-chain-logo"><Image src={tokenLogoUrl(position.market.token, position.market.chain === "base" ? 8453 : 4663)} alt="" width={34} height={34} unoptimized /><ChainBadge chain={position.market.chain} /></span><span><strong>{position.market.symbol}</strong><small>{position.market.name}</small></span></div>
+                    <strong>{amount(position.balanceRaw, position.market.decimals)} {position.market.symbol}</strong>
+                    <span>{amount(position.redeemableRaw, position.market.reserveDecimals)} {position.market.reserveSymbol}</span>
+                    <b>{amount(position.burnRoyaltyRaw, position.market.reserveDecimals)} {position.market.reserveSymbol}</b>
+                    <ArrowRight />
+                  </Link>
+                )) : <EmptyPortfolioRow first="None" values={["0", "0", "0"]} />}
+              </div>
+            </section>
           )}
           {tab === "launches" && (
-            launches.length ? <section className="portfolio-section">
+            <section className="portfolio-section">
               <div className="portfolio-table pool-table">
                 <div className="portfolio-table-head" aria-hidden="true"><span>Pool</span><span>Reserve</span><span>Network</span><span>Block</span><span>Action</span></div>
-                {launches.map((market) => (
+                {launches.length ? launches.map((market) => (
                   <Link className="portfolio-row" href={`/market/${market.chain}/${market.token}`} key={`${market.chain}-${market.token}`}>
                     <div className="portfolio-market"><span className="token-chain-logo"><Image src={tokenLogoUrl(market.token, CHAINS[market.chain].id)} alt="" width={34} height={34} unoptimized /><ChainBadge chain={market.chain} /></span><span><strong>{market.symbol}</strong><small>{market.name}</small></span></div>
                     <strong>{market.reserveSymbol}</strong>
@@ -140,15 +123,15 @@ export function PortfolioView() {
                     <b>{market.blockNumber}</b>
                     <ArrowRight />
                   </Link>
-                ))}
+                )) : <EmptyPortfolioRow first="None" values={["None", "None", "0"]} />}
               </div>
-            </section> : <EmptyPortfolio title="No pools" />
+            </section>
           )}
           {tab === "activity" && (
-            activity.length ? <section className="portfolio-section">
+            <section className="portfolio-section">
               <div className="portfolio-table activity-table">
                 <div className="portfolio-table-head" aria-hidden="true"><span>Type</span><span>Token</span><span>Reserve</span><span>Block</span><span>Action</span></div>
-                {activity.map((item) => {
+                {activity.length ? activity.map((item) => {
                   const action = item.type === "Mint" ? "Buy" : "Sell";
                   return <a className="portfolio-row" href={`${CHAINS[item.chain].explorerUrl}/tx/${item.transactionHash}`} key={`${item.chain}-${item.transactionHash}-${item.type}`} target="_blank" rel="noreferrer">
                     <div className="portfolio-market"><span className={`activity-type ${item.type.toLowerCase()}`}>{action}</span><span><strong>{item.tokenSymbol}</strong><small>{CHAINS[item.chain].shortName}</small></span></div>
@@ -157,16 +140,16 @@ export function PortfolioView() {
                     <b>{item.blockNumber}</b>
                     <ExternalLink />
                   </a>;
-                })}
+                }) : <EmptyPortfolioRow first="None" values={["0", "0", "0"]} />}
               </div>
-            </section> : <EmptyPortfolio title="No activity" />
+            </section>
           )}
         </>
-      ) : <EmptyPortfolio title="No data" />}
+      )}
     </div>
   );
 }
 
-function EmptyPortfolio({ title, body }: { title: string; body?: string }) {
-  return <div className="empty-state compact"><WalletCards /><h2>{title}</h2>{body ? <p>{body}</p> : null}</div>;
+function EmptyPortfolioRow({ first, values }: { first: string; values: [string, string, string] }) {
+  return <div className="portfolio-row empty-row"><div className="portfolio-market"><span><strong>{first}</strong></span></div><strong>{values[0]}</strong><span>{values[1]}</span><b>{values[2]}</b><span>—</span></div>;
 }
