@@ -770,8 +770,9 @@ button { color: inherit; }
 .market-auto-status span { display: inline-flex; align-items: center; gap: 7px; }
 .market-auto-status i { width: 7px; height: 7px; border-radius: 50%; background: #52d99d; box-shadow: 0 0 0 4px rgba(82,217,157,.12); }
 .market-auto-status small { color: #a99aa5; font-weight: 600; }
-.watch-help-trigger { width: 18px; height: 18px; display: inline-grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; color: var(--muted); background: white; font-size: var(--text-meta); font-weight: 900; line-height: 1; cursor: pointer; }
-.watch-help-trigger:hover { color: white; border-color: var(--ink); background: var(--ink); }
+.watch-help-trigger { width: 18px; height: 18px; display: inline-grid; place-items: center; padding: 0; border: 0; color: var(--muted); background: transparent; cursor: pointer; }
+.watch-help-trigger svg { width: 14px; height: 14px; }
+.watch-help-trigger:hover { color: var(--ink); }
 .market-auto-summary { margin: 14px 0; }
 .market-auto-summary div { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.09); }
 .market-auto-summary dt { color: #a99aa5; font-size: var(--text-meta); }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Info, X } from "lucide-react";
+import { CircleHelp, Info, X } from "lucide-react";
 import { formatUnits } from "viem";
 import type { DirectArbitrageExecutionQuote } from "@/lib/arbitrage";
 
@@ -61,7 +61,7 @@ export function ArbitrageWatchHelp({
   return <>
     {trigger === "details"
       ? <button className="market-details-trigger" onClick={() => setOpen(true)} type="button"><Info /> Details</button>
-      : <button className="watch-help-trigger" aria-label="Explain status" onClick={() => setOpen(true)} type="button">?</button>}
+      : <button className="watch-help-trigger" aria-label="Explain status" onClick={() => setOpen(true)} type="button"><CircleHelp /></button>}
     {open && <div className="market-details-layer" role="presentation" onMouseDown={() => setOpen(false)}>
       <section className="market-details-dialog" aria-label="Arbitrage status" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
         <button className="market-details-close" aria-label="Close status" onClick={() => setOpen(false)} type="button"><X /></button>
