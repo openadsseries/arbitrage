@@ -33,10 +33,12 @@ export function MarketArbitrageHistory({
   market,
   latestExecution,
   refreshSignal,
+  watchReason,
 }: {
   market: VerifiedMarket;
   latestExecution: ReserveArbitrageExecution | null;
   refreshSignal: number;
+  watchReason?: string;
 }) {
   const wallet = useWallet();
   const [snapshot, setSnapshot] = useState<ContinuousArbitrageSnapshot | null>(null);
@@ -109,6 +111,9 @@ export function MarketArbitrageHistory({
     (total, execution) => total + walletProfitRaw(execution),
     0n,
   );
+  const activeStatus = watchReason === "Gas too high." || watchReason === "Waiting for gas."
+    ? "Gas wait"
+    : "Watching";
 
   async function stop(strategy: ContinuousArbitrageStrategy) {
     if (!wallet.address || !snapshot?.executor) return;
@@ -179,7 +184,7 @@ export function MarketArbitrageHistory({
             <strong>—</strong>
             <strong className="positive">+{tokenAmount(activePnlRaw.toString(), market.reserveDecimals)} {market.reserveSymbol}</strong>
             <strong>{activeStrategy.executionCount}</strong>
-            <strong>Watching</strong>
+            <strong>{activeStatus}</strong>
             <div className="position-actions">
               <button disabled={Boolean(busy)} onClick={() => void stop(activeStrategy)} type="button">
                 {busy === activeStrategy.id ? <LoaderCircle className="spin" /> : <Pause />} Stop

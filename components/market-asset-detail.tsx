@@ -129,7 +129,7 @@ export function MarketAssetDetail({
               />
             </aside>
           </section>
-          <MarketArbitrageHistory market={market} latestExecution={latestExecution} refreshSignal={historyRefreshToken} />
+          <MarketArbitrageHistory market={market} latestExecution={latestExecution} refreshSignal={historyRefreshToken} watchReason={activeWatchReason} />
         </>
       )}
 

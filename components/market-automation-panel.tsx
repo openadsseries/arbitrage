@@ -51,10 +51,20 @@ const WATCH_HIDDEN_MS = 120_000;
 const RELAY_COOLDOWN_MS = 12_000;
 const PASSIVE_WATCH_REASONS = new Set([
   "Base is busy. Try again soon.",
+  "Gas too high.",
   "Not executable now.",
   "No route now.",
   "Waiting for gas.",
 ]);
+
+function relayWatchReason(reason: unknown) {
+  if (reason instanceof RelayRequestError) {
+    if (reason.payload.status === "waiting-gas") return "Gas too high.";
+    if (reason.payload.status === "none") return errorMessage(reason.payload.error, "No route now.");
+    return errorMessage(reason.payload.error, "Watching.");
+  }
+  return errorMessage(reason, "Watching.");
+}
 
 function reserveAmount(raw: string, decimals: number) {
   return Number(formatUnits(BigInt(raw), decimals)).toLocaleString("en-US", { maximumFractionDigits: 8 });
@@ -283,7 +293,7 @@ export function MarketAutomationPanel({
         onPositionChange?.();
       } catch (reason) {
         if (active) {
-          const text = errorMessage(reason, "Watching.");
+          const text = relayWatchReason(reason);
           onActiveQuoteChange?.(reason instanceof RelayRequestError ? reason.payload.execution ?? null : null);
           setWatchReason(text);
           if (PASSIVE_WATCH_REASONS.has(text)) setError("");
@@ -394,7 +404,7 @@ export function MarketAutomationPanel({
         relayCooldownUntil.current = Date.now() + RELAY_COOLDOWN_MS;
         executed = true;
       } catch (reason) {
-        const text = errorMessage(reason, "Watching.");
+        const text = relayWatchReason(reason);
         onActiveQuoteChange?.(reason instanceof RelayRequestError ? reason.payload.execution ?? null : null);
         setWatchReason(text);
         if (!PASSIVE_WATCH_REASONS.has(text)) setError(text);
@@ -506,8 +516,8 @@ export function MarketAutomationPanel({
 
   return <section className="market-auto-panel">
     {running ? <>
-      <div className="market-auto-status"><span><i /> Watching</span><small>{watchReason || "This browser"}</small></div>
-      <h2>{watchReason === "Waiting for gas." ? "Waiting for gas to drop." : "Watching prices."}</h2>
+      <div className="market-auto-status"><span><i /> {watchReason === "Gas too high." ? "Gas wait" : "Watching"}</span><small>{watchReason || "This browser"}</small></div>
+      <h2>{watchReason === "Gas too high." ? "Waiting for gas." : "Watching prices."}</h2>
       <dl className="market-auto-summary">
         <div><dt>Profit</dt><dd className="positive">+{reserveAmount(totalProfitRaw.toString(), market.reserveDecimals)} {market.reserveSymbol}</dd></div>
         <div><dt>Runs</dt><dd>{running.executionCount}</dd></div>

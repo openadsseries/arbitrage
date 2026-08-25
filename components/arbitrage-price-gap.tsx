@@ -296,7 +296,7 @@ export function ArbitragePriceGap({
     : null;
   const routeDetails = route ? routeCopy(route, market, ownerReturnRaw, opportunity?.reserveDecimals ?? market.reserveDecimals) : null;
   const headline = (() => {
-    if (active && watchReason === "Waiting for gas.") return "Waiting for gas to drop";
+    if (active && (watchReason === "Waiting for gas." || watchReason === "Gas too high.")) return "Gas too high";
     if (watchReason === "Base is busy. Try again soon.") return "Checking prices";
     if (active && (watchReason === "No route now." || watchReason === "Not executable now.")) return "No profit right now";
     if (active && !activeQuote) return "Checking prices";
@@ -319,7 +319,7 @@ export function ArbitragePriceGap({
 
       <HistoricalPriceChart comparison={marketComparison} market={market} />
 
-      {route && !(active && watchReason === "Waiting for gas.") && <>
+      {route && !(active && (watchReason === "Waiting for gas." || watchReason === "Gas too high.")) && <>
         <div className="price-gap-route-wrap">
           <span>Arbitrage path</span>
           <div className="price-gap-route visual" aria-label={routeDetails?.aria ?? "Profit path"}>
