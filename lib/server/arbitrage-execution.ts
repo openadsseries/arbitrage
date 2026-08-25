@@ -13,6 +13,7 @@ import { CHAINS } from "@/lib/chains";
 const ONCHAIN_ROUTER = "0xCa7a19BD1E260DCd92B17DdAc068C2bF67539a02" as const;
 const BPS = 10_000n;
 const SLIPPAGE_BPS = 50n;
+const GAS_MARGIN_BPS = 12_000n;
 
 const ROUTER_ABI = parseAbi([
   "function routeExactInput((address tokenIn,address tokenOut,uint256 amountSpecified) params) view returns (((address tokenIn,address tokenOut,uint24 fee,address pool,uint8 version,(address currency0,address currency1,uint24 fee,int24 tickSpacing,address hooks) key)[] path,uint256 amountIn,uint256 amountOut) quote)",
@@ -36,6 +37,7 @@ type Strategy = {
 type Candidate = {
   direction: 0 | 1;
   amount: bigint;
+  executorReward: bigint;
   ownerProfit: bigint;
   walletProfit: bigint;
   expectedReturn: bigint;
@@ -121,6 +123,7 @@ async function mintThenSell(
   return {
     direction: 0,
     amount: reserveRequired,
+    executorReward: parts.executorReward,
     ownerProfit: parts.ownerProfit,
     walletProfit: parts.walletProfit,
     expectedReturn: reserveOut,
@@ -157,6 +160,7 @@ async function buyThenRedeem(
   return {
     direction: 1,
     amount: budget,
+    executorReward: parts.executorReward,
     ownerProfit: parts.ownerProfit,
     walletProfit: parts.walletProfit,
     expectedReturn: reserveOut,
@@ -228,6 +232,7 @@ export async function buildDirectArbitrageExecution({
   ]))).filter((candidate): candidate is Candidate => Boolean(candidate))
     .sort((left, right) => left.walletProfit > right.walletProfit ? -1 : left.walletProfit < right.walletProfit ? 1 : 0);
 
+  let gasRejected = false;
   for (const candidate of candidates) {
     try {
       const simulation = await client.simulateContract({
@@ -238,6 +243,16 @@ export async function buildDirectArbitrageExecution({
         args: [strategyId, candidate.direction, candidate.params],
         blockTag: "pending",
       });
+      const [gas, gasPrice, rewardWeth] = await Promise.all([
+        client.estimateContractGas({ ...simulation.request, account: owner, blockTag: "pending" }),
+        client.getGasPrice(),
+        quoteExactInput(strategy.reserveToken, CHAINS.base.weth, candidate.executorReward).catch(() => 0n),
+      ]);
+      const requiredWeth = gas * gasPrice * GAS_MARGIN_BPS / BPS;
+      if (rewardWeth < requiredWeth) {
+        gasRejected = true;
+        continue;
+      }
       return {
         executor,
         strategyId: strategyId.toString(),
@@ -246,12 +261,18 @@ export async function buildDirectArbitrageExecution({
         amountInReserveRaw: candidate.amount.toString(),
         expectedReturnRaw: candidate.expectedReturn.toString(),
         expectedOwnerProfitRaw: candidate.ownerProfit.toString(),
+        expectedExecutorRewardRaw: candidate.executorReward.toString(),
         expectedWalletProfitRaw: candidate.walletProfit.toString(),
         simulatedOwnerReturnRaw: simulation.result.toString(),
+        gasRaw: gas.toString(),
+        gasPriceRaw: gasPrice.toString(),
+        rewardWethRaw: rewardWeth.toString(),
+        requiredWethRaw: requiredWeth.toString(),
       };
     } catch {
       continue;
     }
   }
+  if (gasRejected) throw new Error("Waiting for gas.");
   throw new Error("Not executable now.");
 }

@@ -90,6 +90,7 @@ export function MarketAutomationPanel({
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [watchReason, setWatchReason] = useState("");
   const [showRevoke, setShowRevoke] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
 
@@ -226,6 +227,32 @@ export function MarketAutomationPanel({
     };
   }, [preparation, refreshWalletState, running, wallet.address]);
 
+  useEffect(() => {
+    if (!wallet.address || !activeSnapshot?.executor || !running) {
+      return;
+    }
+    let active = true;
+    const check = async () => {
+      const response = await fetch("/api/arbitrage/execute", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ owner: wallet.address, strategyId: running.id }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (active) setWatchReason(response.ok ? "" : payload.error ?? "Watching.");
+    };
+    void check().catch((reason) => {
+      if (active) setWatchReason(errorMessage(reason, "Watching."));
+    });
+    const interval = window.setInterval(() => {
+      void check().catch(() => undefined);
+    }, 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [activeSnapshot?.executor, running, wallet.address]);
+
   async function executeStrategyNow(address: Address, strategyId: bigint, executor: Address) {
     setProgress("Quote");
     const response = await fetch("/api/arbitrage/execute", {
@@ -268,6 +295,7 @@ export function MarketAutomationPanel({
     setProgress("Connecting wallet");
     setError("");
     setMessage("");
+    setWatchReason("");
     let approvalMayRemain = false;
     try {
       const address = wallet.address ?? await wallet.connect("base");
@@ -347,7 +375,9 @@ export function MarketAutomationPanel({
         await executeStrategyNow(address, strategyId, currentSnapshot.executor);
         executed = true;
       } catch (reason) {
-        setError(errorMessage(reason, "Not executable now."));
+        const text = errorMessage(reason, "No route now.");
+        setWatchReason(text);
+        if (text !== "Waiting for gas.") setError(text);
       }
       const nextSnapshot = await refreshSettledWalletState(address, preparation);
       setMessage(executed
@@ -368,6 +398,7 @@ export function MarketAutomationPanel({
     setBusy(true);
     setProgress("Stopping arbitrage");
     setError("");
+    setWatchReason("");
     try {
       const publicClient = await wallet.getPublicClient("base");
       const walletClient = await wallet.getWalletClient("base");
@@ -455,8 +486,8 @@ export function MarketAutomationPanel({
 
   return <section className="market-auto-panel">
     {running ? <>
-      <div className="market-auto-status"><span><i /> Watching</span><small>Automatic</small></div>
-      <h2>Watching prices.</h2>
+      <div className="market-auto-status"><span><i /> Watching</span><small>{watchReason || "Automatic"}</small></div>
+      <h2>{watchReason === "Waiting for gas." ? "Waiting for gas." : "Watching prices."}</h2>
       <dl className="market-auto-summary">
         <div><dt>Profit</dt><dd className="positive">+{reserveAmount(totalProfitRaw.toString(), market.reserveDecimals)} {market.reserveSymbol}</dd></div>
         <div><dt>Runs</dt><dd>{running.executionCount}</dd></div>
