@@ -1167,6 +1167,8 @@ button { color: inherit; }
 .position-actions > svg { width: 15px; color: var(--muted); }
 .market-position-list button { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 11px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: white; font: inherit; font-size: var(--text-meta); font-weight: 800; cursor: pointer; }
 .market-position-list button svg { width: 13px; }
+.market-position-list button.watch-help-trigger { min-height: 18px; width: 18px; padding: 0; border: 0; border-radius: 0; color: var(--muted); background: transparent; }
+.market-position-list button.watch-help-trigger svg { width: 14px; height: 14px; }
 .market-position-empty { min-height: 46px; display: flex; align-items: center; justify-content: center; padding: 10px 0; border-bottom: 1px solid var(--line); color: var(--muted); font-size: var(--text-meta); font-weight: 700; text-align: center; }
 .market-position-more { width: 100%; min-height: 38px; margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: white; font-size: var(--text-meta); font-weight: 800; cursor: pointer; }
 .market-position-error { margin: 10px 0 0; color: var(--danger); font-size: var(--text-meta); }
