@@ -32,6 +32,7 @@ export const ARBITRAGE_EXECUTOR_V2_ABI = parseAbi([
 export const ARBITRAGE_EXECUTOR_V3_ABI = parseAbi([
   "function startStrategy(address hToken,uint256 maxReservePerExecution,uint256 totalVolume,uint256 minProfitReserve,uint40 validUntil) returns (uint256 strategyId)",
   "function stopStrategy(uint256 strategyId)",
+  "function execute(uint256 strategyId,uint8 direction,(uint256 amountInReserve,uint256 hAmountForMint,uint256 minimumWethOut,uint256 minimumHypedOut,uint256 minimumBondOut,uint256 minimumReserveOut) params) returns (uint256 ownerReturnReserve)",
   "function strategies(uint256 strategyId) view returns (address owner,address hToken,address reserveToken,uint40 validUntil,bool active,uint64 executionCount,uint64 lastExecutionBlock,uint256 maxReservePerExecution,uint256 remainingVolume,uint256 minProfitReserve)",
   "function activeStrategyId(address owner,address reserveToken) view returns (uint256)",
   "function protocolFeeBps() view returns (uint16)",

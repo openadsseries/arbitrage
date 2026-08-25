@@ -104,8 +104,15 @@ export function MarketArbitrageHistory({
   const activeExecutions = useMemo(() => marketExecutions.filter(
     (execution) => execution.strategyId === activeStrategy?.id,
   ), [activeStrategy?.id, marketExecutions]);
+  const walletProfitRaw = useCallback((execution: ContinuousArbitrageExecution) => (
+    BigInt(execution.ownerProfitReserveRaw) + (
+      wallet.address && execution.executor.toLowerCase() === wallet.address.toLowerCase()
+        ? BigInt(execution.executorRewardReserveRaw)
+        : 0n
+    )
+  ), [wallet.address]);
   const activePnlRaw = activeExecutions.reduce(
-    (total, execution) => total + BigInt(execution.ownerProfitReserveRaw),
+    (total, execution) => total + walletProfitRaw(execution),
     0n,
   );
 
@@ -169,12 +176,12 @@ export function MarketArbitrageHistory({
           <article>
             <div className="position-market">
               <Image src={tokenLogoUrl(market.token, CHAINS.base.id)} alt="" width={34} height={34} unoptimized />
-              <span><strong>Open</strong><small>#{activeStrategy.id}</small></span>
+              <span><strong>Watching</strong><small>#{activeStrategy.id}</small></span>
             </div>
             <strong>{tokenAmount(activeStrategy.remainingVolumeRaw, market.reserveDecimals)} {market.reserveSymbol}</strong>
             <strong>—</strong>
             <strong className="positive">+{tokenAmount(activePnlRaw.toString(), market.reserveDecimals)} {market.reserveSymbol}</strong>
-            <strong>Running</strong>
+            <strong>Waiting</strong>
             <div className="position-actions">
               <button disabled={Boolean(busy)} onClick={() => void stop(activeStrategy)} type="button">
                 {busy === activeStrategy.id ? <LoaderCircle className="spin" /> : <Pause />} Stop
@@ -191,7 +198,7 @@ export function MarketArbitrageHistory({
             </div>
             <strong>{tokenAmount(execution.amountInReserveRaw, market.reserveDecimals)} {market.reserveSymbol}</strong>
             <strong>{tokenAmount(execution.amountReturnedReserveRaw, market.reserveDecimals)} {market.reserveSymbol}</strong>
-            <strong className="positive">+{tokenAmount(execution.ownerProfitReserveRaw, market.reserveDecimals)} {market.reserveSymbol}</strong>
+            <strong className="positive">+{tokenAmount(walletProfitRaw(execution).toString(), market.reserveDecimals)} {market.reserveSymbol}</strong>
             <strong>Done</strong>
             <span className="position-actions"><ExternalLink /></span>
           </a>

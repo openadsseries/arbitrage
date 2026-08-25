@@ -186,7 +186,7 @@ export function ArbitragePortfolio({ wallet, markets }: { wallet: Address; marke
   return (
     <div className="automation-page">
       <section className="automation-stats">
-        <div><span>Running</span><strong>{activeStrategies.length}</strong><small>Reserve Token routes</small></div>
+        <div><span>Watching</span><strong>{activeStrategies.length}</strong><small>Reserve Token routes</small></div>
         <div><span>Completed</span><strong>{continuous.executions.length}</strong><small>Successful executions</small></div>
         <div><span>Settlement</span><strong>Reserve</strong><small>Principal and profit return in the OG token</small></div>
       </section>
@@ -200,11 +200,11 @@ export function ArbitragePortfolio({ wallet, markets }: { wallet: Address; marke
           const symbol = market?.reserveSymbol ?? "Reserve";
           return <article key={strategy.id}>
             <div className="automation-market"><Image src={tokenLogoUrl(strategy.hToken, CHAINS.base.id)} alt="" width={38} height={38} unoptimized /><span><strong>{market ? `${market.reserveSymbol} ↔ ${market.symbol}` : shortAddress(strategy.hToken)}</strong><small>{tokenAmount(strategy.remainingVolumeRaw, decimals)} {symbol} left</small></span></div>
-            <span className={live ? "automation-live" : "automation-off"}>{live ? "Running" : strategy.active ? "Expired" : "Stopped"}</span>
+            <span className={live ? "automation-live" : "automation-off"}>{live ? "Watching" : strategy.active ? "Expired" : "Stopped"}</span>
             <time>{strategy.validUntil === 0 ? `${strategy.executionCount} executions` : new Date(strategy.validUntil * 1000).toLocaleString("en-US")}</time>
             {live ? <button disabled={busy} onClick={() => void stopContinuous(strategy.id, strategy.reserveToken)} type="button"><Pause /> Stop</button> : market ? <Link className="automation-row-link" href={`/market/base/${market.token}`}>Open <ArrowRight /></Link> : null}
           </article>;
-        })}</div> : <div className="empty-state compact"><ShieldCheck /><h2>No arbitrage yet.</h2><p>Open a supported market, check the live return, and start from there.</p></div>}
+        })}</div> : <div className="empty-state compact"><ShieldCheck /><h2>No arbitrage yet.</h2><p>Open a supported market, check the live return, and execute from there.</p></div>}
       </section>
 
       {message && <div className="automation-message"><CheckCircle2 /><span>{message}</span></div>}

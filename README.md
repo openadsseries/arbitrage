@@ -51,9 +51,9 @@ Historical charts explain how the two assets moved. They do **not** decide wheth
 ### Arbitrage
 
 - Checks both Reserve Token round trips.
-- Lets the user enter one Reserve Token amount and start from one action.
+- Lets the user enter one Reserve Token amount and execute from one action.
 - Uses that amount as both the V3 execution size and the total wallet permission.
-- Repeats checks only until the entered amount is filled or the user stops it.
+- Tries execution immediately; if price moves first, the route remains watchable until filled or stopped.
 - Keeps user funds in the wallet between executions.
 - Returns Reserve Token principal and protected profit atomically in every successful transaction.
 - Reverts the complete transaction when the protected result cannot be returned.

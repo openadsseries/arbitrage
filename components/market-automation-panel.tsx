@@ -26,6 +26,19 @@ type Preparation = {
   reserveSymbol: string;
   readBlock: string;
 };
+type DirectExecution = {
+  executor: Address;
+  strategyId: string;
+  direction: 0 | 1;
+  params: {
+    amountInReserve: string;
+    hAmountForMint: string;
+    minimumWethOut: string;
+    minimumHypedOut: string;
+    minimumBondOut: string;
+    minimumReserveOut: string;
+  };
+};
 
 function reserveAmount(raw: string, decimals: number) {
   return Number(formatUnits(BigInt(raw), decimals)).toLocaleString("en-US", { maximumFractionDigits: 8 });
@@ -183,7 +196,11 @@ export function MarketAutomationPanel({
     (execution) => execution.strategyId === running?.id,
   ) ?? [], [activeSnapshot, running?.id]);
   const totalProfitRaw = runningExecutions.reduce(
-    (total, execution) => total + BigInt(execution.ownerProfitReserveRaw),
+    (total, execution) => total + BigInt(execution.ownerProfitReserveRaw) + (
+      wallet.address && execution.executor.toLowerCase() === wallet.address.toLowerCase()
+        ? BigInt(execution.executorRewardReserveRaw)
+        : 0n
+    ),
     0n,
   );
 
@@ -202,7 +219,62 @@ export function MarketAutomationPanel({
     };
   }, [preparation, refreshWalletState, running, wallet.address]);
 
-  async function start() {
+  async function executeStrategyNow(address: Address, strategyId: bigint, executor: Address) {
+    setProgress("Quote");
+    const response = await fetch("/api/arbitrage/execute", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ owner: address, strategyId: strategyId.toString() }),
+    });
+    const payload = await response.json() as { execution?: DirectExecution; error?: string };
+    if (!response.ok || !payload.execution) throw new Error(payload.error ?? "Not executable now.");
+    const execution = payload.execution;
+    const publicClient = await wallet.getPublicClient("base");
+    const walletClient = await wallet.getWalletClient("base");
+    setProgress("Execute");
+    const request = await publicClient.simulateContract({
+      account: address,
+      address: executor,
+      abi: ARBITRAGE_EXECUTOR_V3_ABI,
+      functionName: "execute",
+      args: [
+        BigInt(execution.strategyId),
+        execution.direction,
+        {
+          amountInReserve: BigInt(execution.params.amountInReserve),
+          hAmountForMint: BigInt(execution.params.hAmountForMint),
+          minimumWethOut: BigInt(execution.params.minimumWethOut),
+          minimumHypedOut: BigInt(execution.params.minimumHypedOut),
+          minimumBondOut: BigInt(execution.params.minimumBondOut),
+          minimumReserveOut: BigInt(execution.params.minimumReserveOut),
+        },
+      ],
+    });
+    const hash = await walletClient.writeContract(request.request);
+    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+    if (receipt.status !== "success") throw new Error("Execution failed.");
+  }
+
+  async function executeRunning() {
+    if (!wallet.address || !activeSnapshot?.executor || !running) return;
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      await executeStrategyNow(wallet.address, BigInt(running.id), activeSnapshot.executor);
+      setMessage("Executed.");
+      await refreshWalletState(wallet.address, preparation);
+      onPositionChange?.();
+    } catch (reason) {
+      setError(errorMessage(reason, "Not executable now."));
+      setMessage("Watching.");
+    } finally {
+      setBusy(false);
+      setProgress("");
+    }
+  }
+
+  async function execute() {
     if (!preparation || budgetRaw === null || totalLimitRaw === null || budgetError) return;
     setBusy(true);
     setProgress("Connecting wallet");
@@ -211,7 +283,7 @@ export function MarketAutomationPanel({
     let approvalMayRemain = false;
     try {
       const address = wallet.address ?? await wallet.connect("base");
-      if (!address) throw new Error("Connect a wallet to start arbitrage.");
+      if (!address) throw new Error("Connect a wallet to execute.");
       const currentSnapshot = wallet.address && activeSnapshot ? activeSnapshot : await readSnapshot(address);
       if (!currentSnapshot.configured || !currentSnapshot.executor) throw new Error("Arbitrage is not available yet.");
 
@@ -260,7 +332,7 @@ export function MarketAutomationPanel({
           if (receipt.status !== "success") throw new Error(`${market.reserveSymbol} approval did not confirm.`);
           if (index === approvalCalls.length - 1) approvalMayRemain = true;
         }
-        setProgress("Starting arbitrage");
+        setProgress("Prepare");
         const request = await publicClient.simulateContract({
           account: address,
           address: currentSnapshot.executor,
@@ -270,15 +342,29 @@ export function MarketAutomationPanel({
         });
         const hash = await walletClient.writeContract(request.request);
         const receipt = await publicClient.waitForTransactionReceipt({ hash });
-        if (receipt.status !== "success") throw new Error("Arbitrage did not start.");
+        if (receipt.status !== "success") throw new Error("Preparation failed.");
       }
       setShowRevoke(false);
-      setMessage("Arbitrage started.");
+      const strategyId = await publicClient.readContract({
+        address: currentSnapshot.executor,
+        abi: ARBITRAGE_EXECUTOR_V3_ABI,
+        functionName: "activeStrategyId",
+        args: [address, preparation.reserveToken],
+        blockTag: "pending",
+      });
+      if (strategyId === 0n) throw new Error("Position not found.");
+      try {
+        await executeStrategyNow(address, strategyId, currentSnapshot.executor);
+        setMessage("Executed.");
+      } catch (reason) {
+        setError(errorMessage(reason, "Not executable now."));
+        setMessage("Watching.");
+      }
       await refreshWalletState(address, preparation);
       onPositionChange?.();
     } catch (reason) {
       if (approvalMayRemain) setShowRevoke(true);
-      setError(errorMessage(reason, "Could not start arbitrage."));
+      setError(errorMessage(reason, "Could not execute."));
     } finally {
       setBusy(false);
       setProgress("");
@@ -377,16 +463,19 @@ export function MarketAutomationPanel({
 
   return <section className="market-auto-panel">
     {running ? <>
-      <div className="market-auto-status"><span><i /> Running</span><small>Until filled or stopped</small></div>
-      <h2>Arbitrage is on.</h2>
+      <div className="market-auto-status"><span><i /> Watching</span><small>Ready to execute</small></div>
+      <h2>Waiting for price.</h2>
       <dl className="market-auto-summary">
         <div><dt>Total profit</dt><dd className="positive">+{reserveAmount(totalProfitRaw.toString(), market.reserveDecimals)} {market.reserveSymbol}</dd></div>
         <div><dt>Executions</dt><dd>{running.executionCount}</dd></div>
         <div><dt>Amount left</dt><dd>{reserveAmount(running.remainingVolumeRaw, market.reserveDecimals)} {market.reserveSymbol}</dd></div>
       </dl>
-      <button className="market-auto-stop" disabled={busy} onClick={() => void stopAndRevoke()} type="button">{busy ? <LoaderCircle className="spin" /> : <Pause />} {busy ? progress : "Stop and remove permission"}</button>
+      <div className="market-auto-actions">
+        <button className="button-primary automation-action" disabled={busy} onClick={() => void executeRunning()} type="button">{busy ? <LoaderCircle className="spin" /> : <Play />} {busy ? progress : "Execute now"}</button>
+        <button className="market-auto-stop" disabled={busy} onClick={() => void stopAndRevoke()} type="button">{busy ? <LoaderCircle className="spin" /> : <Pause />} Stop</button>
+      </div>
     </> : <>
-      <span className="kicker">2 · Start arbitrage</span>
+      <span className="kicker">2 · Execute</span>
       <div className="market-auto-budget">
         <label htmlFor="arbitrage-budget">Amount</label>
         <div className="market-auto-budget-input">
@@ -405,8 +494,8 @@ export function MarketAutomationPanel({
         </dl>
         {budgetError && <em>{budgetError}</em>}
       </div>
-      <button className="button-primary automation-action" disabled={busy || !preparation || Boolean(budgetError)} onClick={() => void start()} type="button">
-        {busy ? <LoaderCircle className="spin" /> : <Play />} {busy ? progress : preparation ? "Start arbitrage" : "Preparing"}
+      <button className="button-primary automation-action" disabled={busy || !preparation || Boolean(budgetError)} onClick={() => void execute()} type="button">
+        {busy ? <LoaderCircle className="spin" /> : <Play />} {busy ? progress : preparation ? "Execute arbitrage" : "Preparing"}
       </button>
     </>}
 
@@ -424,10 +513,10 @@ export function MarketAutomationPanel({
           <div><strong>Profit number</strong><p>The percent comes from the current executable route after price impact, exchange fees and executor reward.</p></div>
           <div><strong>When {market.symbol} is high</strong><p>The route mints {market.symbol} in Mint Club, then sells it in the pool.</p></div>
           <div><strong>When {market.symbol} is low</strong><p>The route buys {market.symbol} in the pool, then returns it to Mint Club.</p></div>
-          <div><strong>Wallet permission</strong><p>Only the entered {market.reserveSymbol} amount is approved. Funds stay in your wallet until execution.</p></div>
-          <div><strong>Execution</strong><p>The V3 executor can run only if principal and protected profit return in {market.reserveSymbol}; otherwise it reverts.</p></div>
+          <div><strong>Wallet permission</strong><p>Only the entered {market.reserveSymbol} amount is approved.</p></div>
+          <div><strong>Execution</strong><p>Clicking execute tries the trade now. If price moves, it waits.</p></div>
           <div><strong>Gas</strong><p>Gas coverage is checked again at execution. It is not deducted from the displayed quote.</p></div>
-          <div><strong>Stop</strong><p>The position ends when the amount is filled or when you stop and remove permission.</p></div>
+          <div><strong>Stop</strong><p>Stop removes the waiting position.</p></div>
         </div>
         <dl>
           <div><dt>GETHYPED fee</dt><dd>{(activeSnapshot?.protocolFeeBps ?? 0) / 100}%</dd></div>

@@ -776,6 +776,7 @@ button { color: inherit; }
 .market-auto-end-time > span { display: inline-flex; align-items: center; gap: 7px; }
 .market-auto-end-time input[type="checkbox"] { accent-color: var(--brand-pink); }
 .market-auto-end-input input { width: 68px; min-height: 34px; padding: 0 8px; border: 1px solid rgba(255,255,255,.12); border-radius: 7px; outline: 0; color: #fff9fc; background: #241b23; font: inherit; font-size: var(--text-meta); font-weight: 800; }
+.market-auto-actions { display: grid; gap: 8px; }
 .market-auto-stop, .market-auto-revoke { width: 100%; min-height: 42px; display: flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid rgba(255,255,255,.14); border-radius: 8px; color: #fff9fc; background: #241b23; font: inherit; font-size: var(--text-ui); font-weight: 800; cursor: pointer; }
 .market-auto-stop svg { width: 15px; }
 .market-auto-revoke { margin-top: 9px; color: #c8bbc4; background: transparent; }
