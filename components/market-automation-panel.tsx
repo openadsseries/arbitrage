@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, Info, LoaderCircle, Pause, Play, ShieldCheck, X } from "lucide-react";
+import { CheckCircle2, LoaderCircle, Pause, Play, ShieldCheck } from "lucide-react";
 import { encodeFunctionData, formatUnits, type Address } from "viem";
 import { ArbitrageWatchHelp } from "@/components/arbitrage-watch-help";
 import { useWallet } from "@/components/wallet-provider";
@@ -16,7 +16,6 @@ import {
   type ReserveArbitrageExecution,
 } from "@/lib/arbitrage";
 import { compactActionError as errorMessage } from "@/lib/errors";
-import { shortAddress } from "@/lib/format";
 import type { VerifiedMarket } from "@/lib/onchain-types";
 import { sendAtomicCallsIfSupported } from "@/lib/wallet-calls";
 
@@ -123,7 +122,6 @@ export function MarketAutomationPanel({
   const [watchReason, setWatchReason] = useState("");
   const [lastRelayQuote, setLastRelayQuote] = useState<DirectArbitrageExecutionQuote | null>(null);
   const [showRevoke, setShowRevoke] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const relayInFlight = useRef(false);
   const relayCooldownUntil = useRef(0);
 
@@ -568,30 +566,7 @@ export function MarketAutomationPanel({
     {message && <div className="market-auto-message"><CheckCircle2 /> {message}</div>}
     {error && <div className="market-auto-error"><ShieldCheck /> {error}</div>}
     {(showRevoke || permissionRemaining) && !running && <button className="market-auto-revoke" disabled={busy} onClick={() => void revoke()} type="button">Remove permission</button>}
-    <button className="market-details-trigger" onClick={() => setDetailsOpen(true)} type="button"><Info /> Details</button>
-    {detailsOpen && <div className="market-details-layer" role="presentation" onMouseDown={() => setDetailsOpen(false)}>
-      <section className="market-details-dialog" aria-label="Arbitrage details" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
-        <button className="market-details-close" aria-label="Close details" onClick={() => setDetailsOpen(false)} type="button"><X /></button>
-        <span className="kicker">Details</span>
-        <h2>Checks</h2>
-        <div className="market-details-grid">
-          <div><strong>Chart</strong><p>Daily USD prices.</p></div>
-          <div><strong>Profit</strong><p>Live route after fees.</p></div>
-          <div><strong>{market.symbol} high</strong><p>Mint, then sell.</p></div>
-          <div><strong>{market.symbol} low</strong><p>Buy, then redeem.</p></div>
-          <div><strong>Permission</strong><p>Covers repeats. Capped by balance.</p></div>
-          <div><strong>Execution</strong><p>Click once. Then it watches.</p></div>
-          <div><strong>Gas</strong><p>Checked before each run.</p></div>
-          <div><strong>Stop</strong><p>Stops and removes permission.</p></div>
-        </div>
-        <dl>
-          <div><dt>GETHYPED fee</dt><dd>{(activeSnapshot?.protocolFeeBps ?? 0) / 100}%</dd></div>
-          <div><dt>Executor</dt><dd>{(activeSnapshot?.executorRewardBps ?? 2_000) / 100}% of profit</dd></div>
-          <div><dt>User share</dt><dd>{100 - (activeSnapshot?.protocolFeeBps ?? 0) / 100 - (activeSnapshot?.executorRewardBps ?? 2_000) / 100}% of profit</dd></div>
-          {activeSnapshot?.executor && <div><dt>Executor</dt><dd>{shortAddress(activeSnapshot.executor)}</dd></div>}
-        </dl>
-      </section>
-    </div>}
+    <ArbitrageWatchHelp trigger="details" reason={watchReason} quote={lastRelayQuote} reserveSymbol={market.reserveSymbol} reserveDecimals={market.reserveDecimals} />
   </section>;
 }
 

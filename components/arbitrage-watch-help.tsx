@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { X } from "lucide-react";
+import { Info, X } from "lucide-react";
 import { formatUnits } from "viem";
 import type { DirectArbitrageExecutionQuote } from "@/lib/arbitrage";
 
@@ -47,17 +47,21 @@ export function ArbitrageWatchHelp({
   quote,
   reserveSymbol,
   reserveDecimals,
+  trigger = "icon",
 }: {
   reason: string;
   quote: DirectArbitrageExecutionQuote | null;
   reserveSymbol: string;
   reserveDecimals: number;
+  trigger?: "icon" | "details";
 }) {
   const [open, setOpen] = useState(false);
   const copy = statusCopy(reason);
 
   return <>
-    <button className="watch-help-trigger" aria-label="Explain status" onClick={() => setOpen(true)} type="button">?</button>
+    {trigger === "details"
+      ? <button className="market-details-trigger" onClick={() => setOpen(true)} type="button"><Info /> Details</button>
+      : <button className="watch-help-trigger" aria-label="Explain status" onClick={() => setOpen(true)} type="button">?</button>}
     {open && <div className="market-details-layer" role="presentation" onMouseDown={() => setOpen(false)}>
       <section className="market-details-dialog" aria-label="Arbitrage status" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
         <button className="market-details-close" aria-label="Close status" onClick={() => setOpen(false)} type="button"><X /></button>
