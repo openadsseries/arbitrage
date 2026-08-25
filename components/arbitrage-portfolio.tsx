@@ -1,9 +1,8 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, CheckCircle2, ExternalLink, LoaderCircle, Pause, ShieldCheck } from "lucide-react";
+import { CheckCircle2, ExternalLink, LoaderCircle, Pause, ShieldCheck } from "lucide-react";
 import { formatUnits, type Address } from "viem";
 import { useWallet } from "@/components/wallet-provider";
 import { tokenLogoUrl } from "@/components/token-logo";
@@ -95,7 +94,7 @@ export function ArbitragePortfolio({ wallet, markets }: { wallet: Address; marke
           <h2>Active</h2>
           <span>{activeStrategies.length} watching · {continuous.executions.length} runs</span>
         </div>
-        {continuous.strategies.length ? <div className="automation-list">
+        {activeStrategies.length ? <div className="automation-list">
           <div className="automation-table-head" aria-hidden="true">
             <span>Market</span>
             <span>Each run</span>
@@ -103,17 +102,16 @@ export function ArbitragePortfolio({ wallet, markets }: { wallet: Address; marke
             <span>Status</span>
             <span>Action</span>
           </div>
-          {continuous.strategies.map((strategy) => {
+          {activeStrategies.map((strategy) => {
           const market = marketFor(markets, strategy.hToken);
-          const live = strategy.active && BigInt(strategy.remainingVolumeRaw) > 0n && (strategy.validUntil === 0 || strategy.validUntil > continuous.readTimestamp);
           const decimals = market?.reserveDecimals ?? 18;
           const symbol = market?.reserveSymbol ?? "Reserve";
           return <article key={strategy.id}>
             <div className="automation-market"><Image src={tokenLogoUrl(strategy.hToken, CHAINS.base.id)} alt="" width={34} height={34} unoptimized /><span><strong>{market ? `${market.reserveSymbol} ↔ ${market.symbol}` : shortAddress(strategy.hToken)}</strong><small>#{strategy.id}</small></span></div>
             <strong>{tokenAmount(strategy.maxReservePerExecutionRaw, decimals)} {symbol}</strong>
             <strong>{tokenAmount(strategy.remainingVolumeRaw, decimals)} {symbol}</strong>
-            <span className={live ? "automation-live" : "automation-off"}>{live ? "Watching" : strategy.active ? "Expired" : "Stopped"} · {strategy.executionCount}</span>
-            {live ? <button disabled={busy} onClick={() => void stopContinuous(strategy.id, strategy.reserveToken)} type="button"><Pause /> Stop</button> : market ? <Link className="automation-row-link" href={`/market/base/${market.token}`}>Open <ArrowRight /></Link> : null}
+            <span className="automation-live">Watching · {strategy.executionCount}</span>
+            <button disabled={busy} onClick={() => void stopContinuous(strategy.id, strategy.reserveToken)} type="button"><Pause /> Stop</button>
           </article>;
         })}</div> : <div className="empty-state compact"><ShieldCheck /><h2>No arbitrage</h2></div>}
       </section>
