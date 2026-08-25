@@ -165,11 +165,13 @@ export function ArbitragePriceGap({
   marketComparison,
   checkedAmountRaw,
   onEstimatedProfitChange,
+  watchReason = "",
 }: {
   market: VerifiedMarket;
   marketComparison: MarketComparisonState;
   checkedAmountRaw: bigint | null;
   onEstimatedProfitChange?: (raw: string | null) => void;
+  watchReason?: string;
 }) {
   const [opportunity, setOpportunity] = useState<ArbitrageOpportunity | null>(null);
   const [loading, setLoading] = useState(true);
@@ -259,6 +261,15 @@ export function ArbitragePriceGap({
     ? (BigInt(route.amountInRaw) + BigInt(route.ownerDifferenceRaw)).toString()
     : null;
   const routeDetails = route ? routeCopy(route, market, ownerReturnRaw, opportunity?.reserveDecimals ?? market.reserveDecimals) : null;
+  const headline = (() => {
+    if (watchReason === "Waiting for gas.") return "Waiting for gas to drop";
+    if (watchReason === "Base is busy. Try again soon.") return "Checking prices";
+    if (watchReason === "No route now." || watchReason === "Not executable now.") return "No profit right now";
+    if (loading) return "Checking prices";
+    if (quotedAmountRaw === null) return "Enter an amount";
+    if (netPositive && route) return `+${((route.netReturnBps ?? route.gapBps) / 100).toFixed(2)}% profit opportunity`;
+    return "No profit right now";
+  })();
 
   useEffect(() => {
     onEstimatedProfitChange?.(netPositive && route ? route.ownerDifferenceRaw : null);
@@ -268,15 +279,7 @@ export function ArbitragePriceGap({
     <div className="price-gap-view">
       <div className="price-gap-heading">
         <span className="kicker">1. Check profit</span>
-        <h2>
-          <strong>{loading
-            ? "Checking prices"
-            : quotedAmountRaw === null
-              ? "Enter an amount"
-            : netPositive && route
-              ? `+${((route.netReturnBps ?? route.gapBps) / 100).toFixed(2)}% profit opportunity`
-              : "No profit right now"}</strong>
-        </h2>
+        <h2><strong>{headline}</strong></h2>
       </div>
 
       <HistoricalPriceChart comparison={marketComparison} market={market} />

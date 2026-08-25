@@ -61,6 +61,8 @@ export function MarketAutomationPanel({
   initialReadiness,
   onExecutionChange,
   onPositionChange,
+  onActiveAmountChange,
+  onWatchReasonChange,
   budget,
   budgetRaw,
   onBudgetChange,
@@ -70,6 +72,8 @@ export function MarketAutomationPanel({
   initialReadiness: ArbitrageMarketReadiness | null;
   onExecutionChange?: (execution: ReserveArbitrageExecution | null) => void;
   onPositionChange?: () => void;
+  onActiveAmountChange?: (raw: string | null) => void;
+  onWatchReasonChange?: (reason: string) => void;
   budget: string;
   budgetRaw: bigint | null;
   onBudgetChange: (value: string) => void;
@@ -211,6 +215,8 @@ export function MarketAutomationPanel({
   );
 
   useEffect(() => { onExecutionChange?.(latestExecution); }, [latestExecution, onExecutionChange]);
+  useEffect(() => { onActiveAmountChange?.(running?.maxReservePerExecutionRaw ?? null); }, [onActiveAmountChange, running?.maxReservePerExecutionRaw]);
+  useEffect(() => { onWatchReasonChange?.(watchReason); }, [onWatchReasonChange, watchReason]);
 
   useEffect(() => {
     if (!wallet.address || !running) return;

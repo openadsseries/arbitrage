@@ -43,6 +43,8 @@ export function MarketAssetDetail({
   const [estimatedProfitRaw, setEstimatedProfitRaw] = useState<string | null>(null);
   const [historyRefreshToken, setHistoryRefreshToken] = useState(0);
   const [arbitrageBudget, setArbitrageBudget] = useState("1");
+  const [activeArbitrageAmountRaw, setActiveArbitrageAmountRaw] = useState<string | null>(null);
+  const [activeWatchReason, setActiveWatchReason] = useState("");
   const arbitrageBudgetRaw = useMemo(() => {
     try {
       const value = parseUnits(arbitrageBudget, market.reserveDecimals);
@@ -51,7 +53,7 @@ export function MarketAssetDetail({
       return null;
     }
   }, [arbitrageBudget, market.reserveDecimals]);
-  const quoteBudgetRaw = arbitrageBudgetRaw;
+  const quoteBudgetRaw = activeArbitrageAmountRaw ? BigInt(activeArbitrageAmountRaw) : arbitrageBudgetRaw;
   const asset: MarketAssetKind = view === "og" ? "og" : "hyped";
 
   const selected = asset === "og" ? {
@@ -99,7 +101,13 @@ export function MarketAssetDetail({
           <section className="arbitrage-focus market-workspace-face" aria-label={`${market.symbol} arbitrage`}>
             <div className="arbitrage-story">
               {marketsConnected
-                ? <ArbitragePriceGap market={market} checkedAmountRaw={quoteBudgetRaw} marketComparison={marketComparison} onEstimatedProfitChange={setEstimatedProfitRaw} />
+                ? <ArbitragePriceGap
+                    market={market}
+                    checkedAmountRaw={quoteBudgetRaw}
+                    marketComparison={marketComparison}
+                    onEstimatedProfitChange={setEstimatedProfitRaw}
+                    watchReason={activeArbitrageAmountRaw ? activeWatchReason : ""}
+                  />
                 : <div className="price-gap-view"><div className="price-gap-heading"><span className="kicker">Live quote</span><h2>Both markets are required.</h2><p>GETHYPED needs an executable price for both tokens before it can compare them.</p></div></div>}
             </div>
             <aside className="arbitrage-action">
@@ -108,6 +116,8 @@ export function MarketAssetDetail({
                 initialReadiness={arbitrageReadiness}
                 onExecutionChange={setLatestExecution}
                 onPositionChange={() => setHistoryRefreshToken((value) => value + 1)}
+                onActiveAmountChange={setActiveArbitrageAmountRaw}
+                onWatchReasonChange={setActiveWatchReason}
                 budget={arbitrageBudget}
                 budgetRaw={arbitrageBudgetRaw}
                 onBudgetChange={setArbitrageBudget}
