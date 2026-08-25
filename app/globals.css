@@ -1090,11 +1090,12 @@ button { color: inherit; }
 .price-gap-route > span.hyped { color: var(--brand-pink); }
 .price-gap-route.visual { min-height: 42px; display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); gap: 0; padding: 0; }
 .price-gap-route.visual > svg { width: 14px; align-self: center; justify-self: center; color: var(--muted); }
-.price-gap-route > span.route-chip { position: relative; min-height: 38px; width: 100%; justify-content: flex-start; gap: 7px; padding: 0 8px; }
-.price-gap-route > span.route-chip.return { justify-content: flex-start; }
+.price-gap-route.visual > span.route-chip { min-width: 0; width: 100%; justify-self: stretch; justify-content: center; text-align: center; }
+.price-gap-route > span.route-chip { position: relative; min-height: 38px; width: 100%; justify-content: center; gap: 7px; padding: 0 8px; }
+.price-gap-route > span.route-chip.return { justify-content: center; }
 .price-gap-route > span.route-swap svg { width: 14px; color: var(--muted); }
 .price-gap-route > span.route-chip b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.price-gap-route > span.route-chip.return { gap: 5px; padding-right: 0; }
+.price-gap-route > span.route-chip.return { gap: 5px; padding-right: 8px; }
 .price-gap-route > span.route-chip.return b { font-size: var(--text-axis); }
 .price-gap-route b { font-size: inherit; }
 .price-gap-route img { border-radius: 50%; }
