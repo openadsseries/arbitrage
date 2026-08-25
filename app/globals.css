@@ -1118,7 +1118,7 @@ button { color: inherit; }
 .market-position-head h2 { margin: 4px 0 0; font-size: var(--text-body); letter-spacing: -.02em; }
 .market-position-head small { color: var(--muted); font-size: var(--text-meta); font-weight: 800; }
 .market-position-list { display: grid; gap: 0; margin-top: 11px; border-top: 1px solid var(--line); }
-.market-position-columns, .market-position-list article, .market-position-list a { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 14px; align-items: center; }
+.market-position-columns, .market-position-list article, .market-position-list a { display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); gap: 14px; align-items: center; }
 .market-position-columns { min-height: 34px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: var(--text-meta); font-weight: 800; }
 .market-position-list article, .market-position-list a { min-height: 58px; padding: 10px 0; border-bottom: 1px solid var(--line); color: var(--ink); }
 .position-market { min-width: 0; display: flex; align-items: center; gap: 10px; }
@@ -1216,7 +1216,7 @@ button { color: inherit; }
   .arbitrage-action { border-left: 0; border-top: 1px solid var(--line); }
   .market-position-history { padding: 18px 24px 22px; }
   .market-position-list { overflow-x: auto; }
-  .market-position-columns, .market-position-list article, .market-position-list a { min-width: 720px; }
+  .market-position-columns, .market-position-list article, .market-position-list a { min-width: 840px; }
   .arbitrage-readiness { margin-bottom: 34px; }
   .arbitrage-route-row { grid-template-columns: 1fr; gap: 8px; }
   .arbitrage-venues { grid-template-columns: 1fr; gap: 9px; }

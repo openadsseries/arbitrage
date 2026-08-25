@@ -162,6 +162,7 @@ export function MarketArbitrageHistory({
           <span>Size</span>
           <span>Return</span>
           <span>PnL</span>
+          <span>Runs</span>
           <span>Status</span>
           <span>Action</span>
         </div>
@@ -175,6 +176,7 @@ export function MarketArbitrageHistory({
             <strong>{tokenAmount(activeStrategy.remainingVolumeRaw, market.reserveDecimals)} {market.reserveSymbol}</strong>
             <strong>—</strong>
             <strong className="positive">+{tokenAmount(activePnlRaw.toString(), market.reserveDecimals)} {market.reserveSymbol}</strong>
+            <strong>{activeStrategy.executionCount}</strong>
             <strong>Waiting</strong>
             <div className="position-actions">
               <button disabled={Boolean(busy)} onClick={() => void stop(activeStrategy)} type="button">
@@ -193,6 +195,7 @@ export function MarketArbitrageHistory({
             <strong>{tokenAmount(execution.amountInReserveRaw, market.reserveDecimals)} {market.reserveSymbol}</strong>
             <strong>{tokenAmount(execution.amountReturnedReserveRaw, market.reserveDecimals)} {market.reserveSymbol}</strong>
             <strong className="positive">+{tokenAmount(walletProfitRaw(execution).toString(), market.reserveDecimals)} {market.reserveSymbol}</strong>
+            <strong>{execution.executionCount}</strong>
             <strong>Executed</strong>
             <span className="position-actions"><ExternalLink /></span>
           </a>
