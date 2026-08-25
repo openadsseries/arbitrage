@@ -159,7 +159,8 @@ export function MarketArbitrageHistory({
       <div className="market-position-list">
         <div className="market-position-columns" aria-hidden="true">
           <span>Type</span>
-          <span>Size</span>
+          <span>Each run</span>
+          <span>Left</span>
           <span>Return</span>
           <span>PnL</span>
           <span>Runs</span>
@@ -171,13 +172,14 @@ export function MarketArbitrageHistory({
           <article>
             <div className="position-market">
               <Image src={tokenLogoUrl(market.token, CHAINS.base.id)} alt="" width={34} height={34} unoptimized />
-              <span><strong>Watching</strong><small>#{activeStrategy.id}</small></span>
+              <span><strong>Active</strong><small>#{activeStrategy.id}</small></span>
             </div>
             <strong>{tokenAmount(activeStrategy.maxReservePerExecutionRaw, market.reserveDecimals)} {market.reserveSymbol}</strong>
+            <strong>{tokenAmount(activeStrategy.remainingVolumeRaw, market.reserveDecimals)} {market.reserveSymbol}</strong>
             <strong>—</strong>
             <strong className="positive">+{tokenAmount(activePnlRaw.toString(), market.reserveDecimals)} {market.reserveSymbol}</strong>
             <strong>{activeStrategy.executionCount}</strong>
-            <strong>{tokenAmount(activeStrategy.remainingVolumeRaw, market.reserveDecimals)} left</strong>
+            <strong>Watching</strong>
             <div className="position-actions">
               <button disabled={Boolean(busy)} onClick={() => void stop(activeStrategy)} type="button">
                 {busy === activeStrategy.id ? <LoaderCircle className="spin" /> : <Pause />} Stop
@@ -190,9 +192,10 @@ export function MarketArbitrageHistory({
           <a href={`${CHAINS.base.explorerUrl}/tx/${execution.transactionHash}`} target="_blank" rel="noreferrer" key={`${execution.transactionHash}-${execution.strategyId}`}>
             <div className="position-market">
               <Image src={tokenLogoUrl(market.token, CHAINS.base.id)} alt="" width={34} height={34} unoptimized />
-              <span><strong>Filled</strong><small>{execution.direction}</small></span>
+              <span><strong>Run</strong><small>{execution.direction}</small></span>
             </div>
             <strong>{tokenAmount(execution.amountInReserveRaw, market.reserveDecimals)} {market.reserveSymbol}</strong>
+            <strong>—</strong>
             <strong>{tokenAmount(execution.amountReturnedReserveRaw, market.reserveDecimals)} {market.reserveSymbol}</strong>
             <strong className="positive">+{tokenAmount(walletProfitRaw(execution).toString(), market.reserveDecimals)} {market.reserveSymbol}</strong>
             <strong>{execution.executionCount}</strong>
