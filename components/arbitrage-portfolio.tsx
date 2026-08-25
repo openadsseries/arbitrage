@@ -73,8 +73,8 @@ export function ArbitragePortfolio({ wallet, markets }: { wallet: Address; marke
       const revoke = await publicClient.simulateContract({ account: wallet, address: reserveToken, abi: ERC20_PERMISSION_ABI, functionName: "approve", args: [continuous.executor, 0n] });
       const revokeHash = await walletClient.writeContract(revoke.request);
       const revokeReceipt = await publicClient.waitForTransactionReceipt({ hash: revokeHash });
-      if (revokeReceipt.status !== "success") throw new Error("Arbitrage stopped, but the remaining token permission was not removed.");
-      setMessage("Arbitrage stopped and its token permission was removed.");
+      if (revokeReceipt.status !== "success") throw new Error("Permission was not removed.");
+      setMessage("Stopped.");
       await refresh();
     } catch (reason) {
       setError(actionError(reason, "Could not stop arbitrage."));
@@ -84,15 +84,15 @@ export function ArbitragePortfolio({ wallet, markets }: { wallet: Address; marke
     }
   }
 
-  if (!continuous) return <div className="empty-state compact"><LoaderCircle className="spin" /><h2>Reading arbitrage</h2><p>Only confirmed contract state is shown.</p></div>;
+  if (!continuous) return <div className="empty-state compact"><LoaderCircle className="spin" /><h2>Loading</h2></div>;
 
-  if (!continuous.configured) return <section className="automation-unavailable"><ShieldCheck /><div><span className="kicker">Arbitrage</span><h2>Arbitrage is not live on Base yet.</h2><p>No wallet permission is requested until the V3 executor is deployed and verified.</p></div></section>;
+  if (!continuous.configured) return <section className="automation-unavailable"><ShieldCheck /><div><h2>Not available</h2></div></section>;
 
   return (
     <div className="automation-page">
       <section className="automation-list-section">
         <div className="section-heading portfolio-arb-heading">
-          <h2>Arbitrage</h2>
+          <h2>Active</h2>
           <span>{activeStrategies.length} watching · {continuous.executions.length} runs</span>
         </div>
         {continuous.strategies.length ? <div className="automation-list">
@@ -115,14 +115,14 @@ export function ArbitragePortfolio({ wallet, markets }: { wallet: Address; marke
             <span className={live ? "automation-live" : "automation-off"}>{live ? "Watching" : strategy.active ? "Expired" : "Stopped"} · {strategy.executionCount}</span>
             {live ? <button disabled={busy} onClick={() => void stopContinuous(strategy.id, strategy.reserveToken)} type="button"><Pause /> Stop</button> : market ? <Link className="automation-row-link" href={`/market/base/${market.token}`}>Open <ArrowRight /></Link> : null}
           </article>;
-        })}</div> : <div className="empty-state compact"><ShieldCheck /><h2>No arbitrage yet.</h2><p>Open a market and execute from there.</p></div>}
+        })}</div> : <div className="empty-state compact"><ShieldCheck /><h2>No arbitrage</h2></div>}
       </section>
 
       {message && <div className="automation-message"><CheckCircle2 /><span>{message}</span></div>}
-      {error && <div className="alert danger"><ShieldCheck /><div><strong>Action not completed</strong><p>{error}</p></div></div>}
+      {error && <div className="alert danger"><ShieldCheck /><div><strong>Failed</strong><p>{error}</p></div></div>}
 
       <section className="automation-list-section">
-        <div className="section-heading portfolio-arb-heading"><h2>History</h2><span>Confirmed runs only</span></div>
+        <div className="section-heading portfolio-arb-heading"><h2>History</h2></div>
         {continuous.executions.length ? <div className="automation-history">
           <div className="automation-table-head" aria-hidden="true">
             <span>Market</span>
@@ -143,7 +143,7 @@ export function ArbitragePortfolio({ wallet, markets }: { wallet: Address; marke
             <b>{execution.blockNumber}</b>
             <ExternalLink />
           </a>;
-        })}</div> : <div className="empty-state compact"><ShieldCheck /><h2>No completed route.</h2><p>Failed or unprofitable attempts revert and do not appear as completed routes.</p></div>}
+        })}</div> : <div className="empty-state compact"><ShieldCheck /><h2>No history</h2></div>}
       </section>
     </div>
   );

@@ -10,7 +10,7 @@ import { ArbitragePortfolio } from "@/components/arbitrage-portfolio";
 import { tokenLogoUrl } from "@/components/token-logo";
 import { useWallet } from "@/components/wallet-provider";
 import { CHAINS, type ChainKey } from "@/lib/chains";
-import { compact, shortAddress } from "@/lib/format";
+import { compact } from "@/lib/format";
 import type { PortfolioSnapshot } from "@/lib/onchain-types";
 
 type Tab = "positions" | "launches" | "arbitrage" | "activity";
@@ -92,7 +92,6 @@ export function PortfolioView() {
     <div className="inner-page page-shell portfolio-page">
       <div className="page-title">
         <h1>Portfolio</h1>
-        <p>Assets, pools, arbitrage, and activity from this wallet.</p>
       </div>
       <div className="page-tabs portfolio-tabs" role="tablist" aria-label="Portfolio controls">
         <button aria-selected={tab === "positions"} className={tab === "positions" ? "selected" : ""} onClick={() => setTab("positions")} role="tab" type="button">Assets</button>
@@ -102,18 +101,18 @@ export function PortfolioView() {
       </div>
 
       {!address ? (
-        <div className="empty-state compact portfolio-empty"><WalletCards /><h2>Connect a wallet to read positions.</h2><p>No account data is inferred or stored by the page.</p><button className="button-primary" onClick={() => void connect()} type="button">Connect wallet</button></div>
+        <div className="empty-state compact portfolio-empty"><WalletCards /><h2>Connect wallet</h2><button className="button-primary" onClick={() => void connect()} type="button">Connect wallet</button></div>
       ) : tab === "arbitrage" ? (
         arbitrageBusy && arbitrageMarkets.length === 0
-          ? <div className="empty-state compact"><LoaderCircle className="spin" /><h2>Reading arbitrage markets</h2><p>Executable Base routes are being verified.</p></div>
+          ? <div className="empty-state compact"><LoaderCircle className="spin" /><h2>Loading</h2></div>
           : <ArbitragePortfolio wallet={address} markets={arbitrageMarketCatalog} />
       ) : busy ? (
-        <div className="empty-state compact"><LoaderCircle className="spin" /><h2>Reading onchain positions</h2><p>Balances and current return values are being read across supported networks.</p></div>
+        <div className="empty-state compact"><LoaderCircle className="spin" /><h2>Loading</h2></div>
       ) : error ? (
-        <div className="alert danger"><WalletCards /><div><strong>Portfolio read failed</strong><p>{error}</p></div></div>
+        <div className="alert danger"><WalletCards /><div><strong>Could not load</strong><p>{error}</p></div></div>
       ) : snapshots.length ? (
         <>
-          {unavailableChains.length > 0 && <p className="partial-note">Some networks are temporarily unavailable. Available positions remain visible.</p>}
+          {unavailableChains.length > 0 && <p className="partial-note">Some networks are unavailable.</p>}
           {tab === "positions" && (
             positions.length ? <div className="position-grid">{positions.map((position) => (
               <article className="position-card" key={`${position.market.chain}-${position.market.token}`}>
@@ -123,17 +122,14 @@ export function PortfolioView() {
                 </div>
                 <dl>
                   <div><dt>Balance</dt><dd>{amount(position.balanceRaw, position.market.decimals)} {position.market.symbol}</dd></div>
-                  <div><dt>Current return</dt><dd>{amount(position.redeemableRaw, position.market.reserveDecimals)} {position.market.reserveSymbol}</dd></div>
-                  <div><dt>Return fee</dt><dd>{amount(position.burnRoyaltyRaw, position.market.reserveDecimals)} {position.market.reserveSymbol}</dd></div>
-                  <div><dt>Cost basis</dt><dd>Unavailable</dd></div>
+                  <div><dt>Return</dt><dd>{amount(position.redeemableRaw, position.market.reserveDecimals)} {position.market.reserveSymbol}</dd></div>
+                  <div><dt>Fee</dt><dd>{amount(position.burnRoyaltyRaw, position.market.reserveDecimals)} {position.market.reserveSymbol}</dd></div>
                 </dl>
-                <p>Exit value is what the full balance can return now. It is not a last-price valuation.</p>
               </article>
-            ))}</div> : <EmptyPortfolio title="No Hyped Token position." body="Only verified GETHYPED Hyped Token balances appear here." />
+            ))}</div> : <EmptyPortfolio title="No assets" />
           )}
           {tab === "launches" && (
             launches.length ? <section className="portfolio-section">
-              <div className="section-heading portfolio-heading"><h2>Pools</h2><span>{launches.length} confirmed</span></div>
               <div className="portfolio-table pool-table">
                 <div className="portfolio-table-head" aria-hidden="true"><span>Pool</span><span>Reserve</span><span>Network</span><span>Block</span><span>Action</span></div>
                 {launches.map((market) => (
@@ -146,32 +142,31 @@ export function PortfolioView() {
                   </Link>
                 ))}
               </div>
-            </section> : <EmptyPortfolio title="No pools." body="Confirmed pools created by this wallet appear here." />
+            </section> : <EmptyPortfolio title="No pools" />
           )}
           {tab === "activity" && (
             activity.length ? <section className="portfolio-section">
-              <div className="section-heading portfolio-heading"><h2>Activity</h2><span>{activity.length} confirmed</span></div>
               <div className="portfolio-table activity-table">
                 <div className="portfolio-table-head" aria-hidden="true"><span>Type</span><span>Token</span><span>Reserve</span><span>Block</span><span>Action</span></div>
-                {activity.map((item) => (
-                  <a className="portfolio-row" href={`${CHAINS[item.chain].explorerUrl}/tx/${item.transactionHash}`} key={`${item.chain}-${item.transactionHash}-${item.type}`} target="_blank" rel="noreferrer">
-                    <div className="portfolio-market"><span className={`activity-type ${item.type.toLowerCase()}`}>{item.type}</span><span><strong>{item.tokenSymbol}</strong><small>{CHAINS[item.chain].shortName}</small></span></div>
+                {activity.map((item) => {
+                  const action = item.type === "Mint" ? "Buy" : "Sell";
+                  return <a className="portfolio-row" href={`${CHAINS[item.chain].explorerUrl}/tx/${item.transactionHash}`} key={`${item.chain}-${item.transactionHash}-${item.type}`} target="_blank" rel="noreferrer">
+                    <div className="portfolio-market"><span className={`activity-type ${item.type.toLowerCase()}`}>{action}</span><span><strong>{item.tokenSymbol}</strong><small>{CHAINS[item.chain].shortName}</small></span></div>
                     <strong>{amount(item.tokenAmountRaw, item.tokenDecimals)} {item.tokenSymbol}</strong>
                     <span>{amount(item.reserveAmountRaw, item.reserveDecimals)} {item.reserveSymbol}</span>
                     <b>{item.blockNumber}</b>
                     <ExternalLink />
-                  </a>
-                ))}
+                  </a>;
+                })}
               </div>
-            </section> : <EmptyPortfolio title="No activity." body="Confirmed buys and returns appear here." />
+            </section> : <EmptyPortfolio title="No activity" />
           )}
-          <p className="source-note">Wallet {shortAddress(address)} · Live reads across supported networks</p>
         </>
-      ) : <EmptyPortfolio title="No supported network data." body="No inferred positions are shown when a live read is unavailable." />}
+      ) : <EmptyPortfolio title="No data" />}
     </div>
   );
 }
 
-function EmptyPortfolio({ title, body }: { title: string; body: string }) {
-  return <div className="empty-state compact"><WalletCards /><h2>{title}</h2><p>{body}</p></div>;
+function EmptyPortfolio({ title, body }: { title: string; body?: string }) {
+  return <div className="empty-state compact"><WalletCards /><h2>{title}</h2>{body ? <p>{body}</p> : null}</div>;
 }
