@@ -70,6 +70,46 @@ function reserveAmount(raw: string, decimals: number) {
   return Number(formatUnits(BigInt(raw), decimals)).toLocaleString("en-US", { maximumFractionDigits: 8 });
 }
 
+function wethAmount(raw: string) {
+  return Number(formatUnits(BigInt(raw), 18)).toLocaleString("en-US", { maximumFractionDigits: 8 });
+}
+
+function WatchHelp({
+  reason,
+  quote,
+  reserveSymbol,
+  reserveDecimals,
+}: {
+  reason: string;
+  quote: DirectArbitrageExecutionQuote | null;
+  reserveSymbol: string;
+  reserveDecimals: number;
+}) {
+  const gasWait = reason === "Gas too high." || reason === "Waiting for gas.";
+  return <details className="watch-help">
+    <summary aria-label="Explain status">?</summary>
+    <div>
+      {gasWait ? <>
+        <strong>Gas is too high.</strong>
+        {quote && <>
+          <span>Profit +{reserveAmount(quote.expectedOwnerProfitRaw, reserveDecimals)} {reserveSymbol}</span>
+          <span>Reward {wethAmount(quote.rewardWethRaw)} WETH</span>
+          <span>Gas needs {wethAmount(quote.requiredWethRaw)} WETH</span>
+        </>}
+      </> : reason === "No route now." || reason === "Not executable now." ? <>
+        <strong>No route now.</strong>
+        <span>It keeps checking both directions.</span>
+      </> : reason === "Base is busy. Try again soon." ? <>
+        <strong>Base is busy.</strong>
+        <span>It will retry automatically.</span>
+      </> : <>
+        <strong>Watching prices.</strong>
+        <span>It runs when profit covers fees and gas.</span>
+      </>}
+    </div>
+  </details>;
+}
+
 function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
@@ -120,6 +160,7 @@ export function MarketAutomationPanel({
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [watchReason, setWatchReason] = useState("");
+  const [lastRelayQuote, setLastRelayQuote] = useState<DirectArbitrageExecutionQuote | null>(null);
   const [showRevoke, setShowRevoke] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const relayInFlight = useRef(false);
@@ -242,6 +283,7 @@ export function MarketAutomationPanel({
     ),
     0n,
   );
+  const activeStatusLabel = watchReason === "Gas too high." ? "Gas wait" : "Watching";
 
   useEffect(() => { onExecutionChange?.(latestExecution); }, [latestExecution, onExecutionChange]);
   useEffect(() => { onActiveAmountChange?.(running?.maxReservePerExecutionRaw ?? null); }, [onActiveAmountChange, running?.maxReservePerExecutionRaw]);
@@ -284,7 +326,9 @@ export function MarketAutomationPanel({
       relayInFlight.current = true;
       try {
         const payload = await relayStrategy(wallet.address!, running.id);
-        onActiveQuoteChange?.(payload.execution ?? null);
+        const quote = payload.execution ?? null;
+        setLastRelayQuote(quote);
+        onActiveQuoteChange?.(quote);
         relayCooldownUntil.current = Date.now() + RELAY_COOLDOWN_MS;
         if (!active) return;
         setWatchReason("");
@@ -294,7 +338,9 @@ export function MarketAutomationPanel({
       } catch (reason) {
         if (active) {
           const text = relayWatchReason(reason);
-          onActiveQuoteChange?.(reason instanceof RelayRequestError ? reason.payload.execution ?? null : null);
+          const quote = reason instanceof RelayRequestError ? reason.payload.execution ?? null : null;
+          setLastRelayQuote(quote);
+          onActiveQuoteChange?.(quote);
           setWatchReason(text);
           if (PASSIVE_WATCH_REASONS.has(text)) setError("");
         }
@@ -400,12 +446,16 @@ export function MarketAutomationPanel({
       try {
         setProgress("Execute");
         const payload = await relayStrategy(address, strategyId.toString());
-        onActiveQuoteChange?.(payload.execution ?? null);
+        const quote = payload.execution ?? null;
+        setLastRelayQuote(quote);
+        onActiveQuoteChange?.(quote);
         relayCooldownUntil.current = Date.now() + RELAY_COOLDOWN_MS;
         executed = true;
       } catch (reason) {
         const text = relayWatchReason(reason);
-        onActiveQuoteChange?.(reason instanceof RelayRequestError ? reason.payload.execution ?? null : null);
+        const quote = reason instanceof RelayRequestError ? reason.payload.execution ?? null : null;
+        setLastRelayQuote(quote);
+        onActiveQuoteChange?.(quote);
         setWatchReason(text);
         if (!PASSIVE_WATCH_REASONS.has(text)) setError(text);
       }
@@ -516,7 +566,10 @@ export function MarketAutomationPanel({
 
   return <section className="market-auto-panel">
     {running ? <>
-      <div className="market-auto-status"><span><i /> {watchReason === "Gas too high." ? "Gas wait" : "Watching"}</span><small>{watchReason || "This browser"}</small></div>
+      <div className="market-auto-status">
+        <span><i /> {activeStatusLabel}<WatchHelp reason={watchReason} quote={lastRelayQuote} reserveSymbol={market.reserveSymbol} reserveDecimals={market.reserveDecimals} /></span>
+        <small>{watchReason || "This browser"}</small>
+      </div>
       <h2>{watchReason === "Gas too high." ? "Waiting for gas." : "Watching prices."}</h2>
       <dl className="market-auto-summary">
         <div><dt>Profit</dt><dd className="positive">+{reserveAmount(totalProfitRaw.toString(), market.reserveDecimals)} {market.reserveSymbol}</dd></div>

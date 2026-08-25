@@ -12,6 +12,7 @@ import {
   type ContinuousArbitrageExecution,
   type ContinuousArbitrageSnapshot,
   type ContinuousArbitrageStrategy,
+  type DirectArbitrageExecutionQuote,
   type ReserveArbitrageExecution,
 } from "@/lib/arbitrage";
 import { CHAINS } from "@/lib/chains";
@@ -21,6 +22,40 @@ import type { VerifiedMarket } from "@/lib/onchain-types";
 function tokenAmount(raw: string, decimals: number) {
   const value = Number(formatUnits(BigInt(raw), decimals));
   return value.toLocaleString("en-US", { maximumFractionDigits: 8 });
+}
+
+function wethAmount(raw: string) {
+  return Number(formatUnits(BigInt(raw), 18)).toLocaleString("en-US", { maximumFractionDigits: 8 });
+}
+
+function WatchHelp({
+  reason,
+  quote,
+  reserveSymbol,
+  reserveDecimals,
+}: {
+  reason: string;
+  quote: DirectArbitrageExecutionQuote | null;
+  reserveSymbol: string;
+  reserveDecimals: number;
+}) {
+  const gasWait = reason === "Gas too high." || reason === "Waiting for gas.";
+  return <details className="watch-help">
+    <summary aria-label="Explain status">?</summary>
+    <div>
+      {gasWait ? <>
+        <strong>Gas is too high.</strong>
+        {quote && <>
+          <span>Profit +{tokenAmount(quote.expectedOwnerProfitRaw, reserveDecimals)} {reserveSymbol}</span>
+          <span>Reward {wethAmount(quote.rewardWethRaw)} WETH</span>
+          <span>Gas needs {wethAmount(quote.requiredWethRaw)} WETH</span>
+        </>}
+      </> : <>
+        <strong>Watching prices.</strong>
+        <span>It runs when profit covers fees and gas.</span>
+      </>}
+    </div>
+  </details>;
 }
 
 function isLive(strategy: ContinuousArbitrageStrategy, snapshot: ContinuousArbitrageSnapshot) {
@@ -34,11 +69,13 @@ export function MarketArbitrageHistory({
   latestExecution,
   refreshSignal,
   watchReason,
+  activeQuote,
 }: {
   market: VerifiedMarket;
   latestExecution: ReserveArbitrageExecution | null;
   refreshSignal: number;
   watchReason?: string;
+  activeQuote?: DirectArbitrageExecutionQuote | null;
 }) {
   const wallet = useWallet();
   const [snapshot, setSnapshot] = useState<ContinuousArbitrageSnapshot | null>(null);
@@ -184,7 +221,7 @@ export function MarketArbitrageHistory({
             <strong>—</strong>
             <strong className="positive">+{tokenAmount(activePnlRaw.toString(), market.reserveDecimals)} {market.reserveSymbol}</strong>
             <strong>{activeStrategy.executionCount}</strong>
-            <strong>{activeStatus}</strong>
+            <span className="position-status"><strong>{activeStatus}</strong><WatchHelp reason={watchReason ?? ""} quote={activeQuote ?? null} reserveSymbol={market.reserveSymbol} reserveDecimals={market.reserveDecimals} /></span>
             <div className="position-actions">
               <button disabled={Boolean(busy)} onClick={() => void stop(activeStrategy)} type="button">
                 {busy === activeStrategy.id ? <LoaderCircle className="spin" /> : <Pause />} Stop
