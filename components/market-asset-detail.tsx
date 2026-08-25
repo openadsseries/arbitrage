@@ -56,7 +56,7 @@ export function MarketAssetDetail({
       return null;
     }
   }, [arbitrageBudget, market.reserveDecimals]);
-  const quoteBudgetRaw = activeArbitrageAmountRaw ? BigInt(activeArbitrageAmountRaw) : arbitrageBudgetRaw;
+  const quoteBudgetRaw = arbitrageBudgetRaw;
   const asset: MarketAssetKind = view === "og" ? "og" : "hyped";
 
   const selected = asset === "og" ? {

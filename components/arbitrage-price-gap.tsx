@@ -196,15 +196,6 @@ export function ArbitragePriceGap({
   }, [checkedAmountRaw]);
 
   useEffect(() => {
-    if (active) {
-      const timer = window.setTimeout(() => {
-        opportunityRef.current = null;
-        setOpportunity(null);
-        setError("");
-        setLoading(false);
-      }, 0);
-      return () => window.clearTimeout(timer);
-    }
     if (quotedAmountRaw === null) {
       const timer = window.setTimeout(() => {
         opportunityRef.current = null;
@@ -270,7 +261,7 @@ export function ArbitragePriceGap({
       window.removeEventListener("focus", refreshWhenVisible);
       controller?.abort();
     };
-  }, [active, market.token, quotedAmountRaw]);
+  }, [market.token, quotedAmountRaw]);
 
   const previewRoute = useMemo(() => {
     if (!opportunity) return null;
@@ -299,7 +290,7 @@ export function ArbitragePriceGap({
       profitable: ownerProfit > 0n,
     };
   }, [activeQuote]);
-  const route = active ? activeRoute : previewRoute;
+  const route = activeRoute ?? previewRoute;
   const netPositive = Boolean(route && (route.netPositive ?? route.profitable));
   const chain = CHAINS[market.chain];
   const ownerReturnRaw = route
@@ -307,13 +298,12 @@ export function ArbitragePriceGap({
     : null;
   const routeDetails = route ? routeCopy(route, market, ownerReturnRaw, opportunity?.reserveDecimals ?? market.reserveDecimals) : null;
   const headline = (() => {
-    if (active && (watchReason === "Waiting for gas." || watchReason === "Gas too high.")) return "Gas too high";
+    if (netPositive && route) return `+${((route.netReturnBps ?? route.gapBps) / 100).toFixed(2)}% profit opportunity`;
     if (watchReason === "Base is busy. Try again soon.") return "Checking prices";
     if (active && (watchReason === "No route now." || watchReason === "Not executable now.")) return "No profit right now";
     if (active && !activeQuote) return "Checking prices";
     if (!active && loading) return "Checking prices";
     if (quotedAmountRaw === null) return "Enter an amount";
-    if (netPositive && route) return `+${((route.netReturnBps ?? route.gapBps) / 100).toFixed(2)}% profit opportunity`;
     return "No profit right now";
   })();
 
@@ -330,7 +320,7 @@ export function ArbitragePriceGap({
 
       <HistoricalPriceChart comparison={marketComparison} market={market} />
 
-      {route && !(active && (watchReason === "Waiting for gas." || watchReason === "Gas too high.")) && <>
+      {route && <>
         <div className="price-gap-route-wrap">
           <span>Arbitrage path</span>
           <div className="price-gap-route visual" aria-label={routeDetails?.aria ?? "Profit path"}>
