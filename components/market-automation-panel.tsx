@@ -32,6 +32,12 @@ const AUTO_REPEAT_COUNT = 10n;
 const WATCH_VISIBLE_MS = 30_000;
 const WATCH_HIDDEN_MS = 120_000;
 const RELAY_COOLDOWN_MS = 12_000;
+const PASSIVE_WATCH_REASONS = new Set([
+  "Base is busy. Try again soon.",
+  "Not executable now.",
+  "No route now.",
+  "Waiting for gas.",
+]);
 
 function reserveAmount(raw: string, decimals: number) {
   return Number(formatUnits(BigInt(raw), decimals)).toLocaleString("en-US", { maximumFractionDigits: 8 });
@@ -250,7 +256,11 @@ export function MarketAutomationPanel({
         await refreshSettledWalletState(wallet.address!, preparation);
         onPositionChange?.();
       } catch (reason) {
-        if (active) setWatchReason(errorMessage(reason, "Watching."));
+        if (active) {
+          const text = errorMessage(reason, "Watching.");
+          setWatchReason(text);
+          if (PASSIVE_WATCH_REASONS.has(text)) setError("");
+        }
       } finally {
         relayInFlight.current = false;
         schedule();
@@ -358,7 +368,7 @@ export function MarketAutomationPanel({
       } catch (reason) {
         const text = errorMessage(reason, "Watching.");
         setWatchReason(text);
-        if (text !== "Waiting for gas." && text !== "Not executable now.") setError(text);
+        if (!PASSIVE_WATCH_REASONS.has(text)) setError(text);
       }
       const nextSnapshot = await refreshSettledWalletState(address, preparation);
       setMessage(executed
