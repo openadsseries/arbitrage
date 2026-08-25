@@ -971,7 +971,7 @@ button { color: inherit; }
 .live-check-grid small { color: var(--muted); font-size: var(--text-supporting); line-height: 1.45; }
 
 /* Market opportunity */
-.market-pair-head { display: flex; justify-content: space-between; align-items: end; gap: 32px; margin: 22px 0 18px; }
+.market-pair-head { display: grid; grid-template-columns: minmax(0,1.45fr) minmax(310px,.65fr); align-items: end; gap: 0; margin: 22px 0 18px; }
 .market-pair-title { min-width: 0; display: flex; align-items: center; gap: 17px; }
 .market-pair-logos { display: flex; flex: 0 0 auto; padding-left: 10px; }
 .market-pair-logos img { border-radius: 50%; background: white; box-shadow: 0 0 0 3px var(--page), 0 7px 18px rgba(47,25,43,.12); }
@@ -979,8 +979,9 @@ button { color: inherit; }
 .market-pair-title .kicker { color: var(--accent); }
 .market-pair-title h1 { margin: 0; font-size: var(--text-section-title); letter-spacing: -.045em; }
 .market-pair-title p { margin: 0; color: var(--muted); font-size: var(--text-supporting); }
-.market-view-select { width: 390px; display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); flex: 0 0 auto; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
-.market-view-select button { min-width: 0; min-height: 38px; padding: 0 10px; border: 0; border-radius: 7px; color: var(--muted); background: transparent; font: inherit; font-size: var(--text-meta); font-weight: 800; white-space: nowrap; cursor: pointer; }
+.market-view-select { width: 100%; display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
+.market-view-select button { min-width: 0; min-height: 38px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 10px; border: 0; border-radius: 7px; color: var(--muted); background: transparent; font: inherit; font-size: var(--text-meta); font-weight: 800; white-space: nowrap; cursor: pointer; }
+.market-view-select button img { flex: 0 0 auto; border-radius: 50%; box-shadow: 0 0 0 1px var(--line); }
 .market-view-select button.selected { color: white; background: var(--brand-pink); }
 .market-view-select button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 
@@ -1208,8 +1209,8 @@ button { color: inherit; }
   .inner-page, .workspace { padding-top: 38px; }
   .market-detail-shell { height: auto; overflow: visible; }
   .market-detail-page { height: auto; display: block; padding-bottom: 48px; }
-  .market-pair-head { align-items: stretch; flex-direction: column; gap: 18px; }
-  .market-view-select { align-self: flex-end; }
+  .market-pair-head { grid-template-columns: 1fr; align-items: stretch; gap: 18px; }
+  .market-view-select { align-self: stretch; }
   .arbitrage-focus { height: auto; grid-template-columns: 1fr; }
   .arbitrage-story { padding: 28px 24px 22px; }
   .arbitrage-action { border-left: 0; border-top: 1px solid var(--line); }

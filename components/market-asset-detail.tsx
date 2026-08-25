@@ -83,8 +83,14 @@ export function MarketAssetDetail({
         </div>
         <div className="market-view-select" role="tablist" aria-label="Market view">
           <button aria-selected={view === "arbitrage"} className={view === "arbitrage" ? "selected" : ""} onClick={() => setView("arbitrage")} role="tab" type="button">Arbitrage</button>
-          <button aria-selected={view === "og"} className={view === "og" ? "selected" : ""} onClick={() => setView("og")} role="tab" type="button">Trade {market.reserveSymbol}</button>
-          <button aria-selected={view === "hyped"} className={view === "hyped" ? "selected" : ""} onClick={() => setView("hyped")} role="tab" type="button">Trade {market.symbol}</button>
+          <button aria-selected={view === "og"} className={view === "og" ? "selected" : ""} onClick={() => setView("og")} role="tab" type="button">
+            <Image src={tokenLogoUrl(market.reserveToken, chain.id)} alt="" width={18} height={18} unoptimized />
+            {market.reserveSymbol}
+          </button>
+          <button aria-selected={view === "hyped"} className={view === "hyped" ? "selected" : ""} onClick={() => setView("hyped")} role="tab" type="button">
+            <Image src={tokenLogoUrl(market.token, chain.id)} alt="" width={18} height={18} unoptimized />
+            {market.symbol}
+          </button>
         </div>
       </header>
 
