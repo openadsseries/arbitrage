@@ -82,22 +82,23 @@ export function PortfolioView() {
   const positions = useMemo(() => snapshots.flatMap((snapshot) => snapshot.positions), [snapshots]);
   const launches = useMemo(() => snapshots.flatMap((snapshot) => snapshot.launches), [snapshots]);
   const activity = useMemo(() => snapshots.flatMap((snapshot) => snapshot.activity), [snapshots]);
+  const arbitrageMarketCatalog = useMemo(() => {
+    const marketMap = new Map<string, PortfolioSnapshot["launches"][number]>();
+    for (const market of [...arbitrageMarkets, ...launches]) marketMap.set(`${market.chain}:${market.token.toLowerCase()}`, market);
+    return [...marketMap.values()];
+  }, [arbitrageMarkets, launches]);
+
   return (
     <div className="inner-page page-shell portfolio-page">
       <div className="page-title">
-        <span className="kicker">Connected wallet</span>
         <h1>Portfolio</h1>
-        <p>Your Hyped Token assets, active arbitrage, and confirmed history.</p>
+        <p>Assets, pools, arbitrage, and activity from this wallet.</p>
       </div>
-      <div className="page-tabs split-tabs" role="tablist" aria-label="Portfolio controls">
-        <div>
-          <button className={tab === "positions" ? "selected" : ""} onClick={() => setTab("positions")} type="button">Assets</button>
-          <button className={tab === "arbitrage" ? "selected" : ""} onClick={() => setTab("arbitrage")} type="button">Arbitrage</button>
-        </div>
-        <div className="portfolio-secondary-tabs">
-          <button className={tab === "launches" ? "selected" : ""} onClick={() => setTab("launches")} type="button">Pools</button>
-          <button className={tab === "activity" ? "selected" : ""} onClick={() => setTab("activity")} type="button">Activity</button>
-        </div>
+      <div className="page-tabs portfolio-tabs" role="tablist" aria-label="Portfolio controls">
+        <button aria-selected={tab === "positions"} className={tab === "positions" ? "selected" : ""} onClick={() => setTab("positions")} role="tab" type="button">Assets</button>
+        <button aria-selected={tab === "arbitrage"} className={tab === "arbitrage" ? "selected" : ""} onClick={() => { if (arbitrageMarkets.length === 0) setArbitrageBusy(true); setTab("arbitrage"); }} role="tab" type="button">Arbitrage</button>
+        <button aria-selected={tab === "launches"} className={tab === "launches" ? "selected" : ""} onClick={() => setTab("launches")} role="tab" type="button">Pools</button>
+        <button aria-selected={tab === "activity"} className={tab === "activity" ? "selected" : ""} onClick={() => setTab("activity")} role="tab" type="button">Activity</button>
       </div>
 
       {!address ? (
@@ -105,7 +106,7 @@ export function PortfolioView() {
       ) : tab === "arbitrage" ? (
         arbitrageBusy && arbitrageMarkets.length === 0
           ? <div className="empty-state compact"><LoaderCircle className="spin" /><h2>Reading arbitrage markets</h2><p>Executable Base routes are being verified.</p></div>
-          : <ArbitragePortfolio wallet={address} markets={arbitrageMarkets} />
+          : <ArbitragePortfolio wallet={address} markets={arbitrageMarketCatalog} />
       ) : busy ? (
         <div className="empty-state compact"><LoaderCircle className="spin" /><h2>Reading onchain positions</h2><p>Balances and current return values are being read across supported networks.</p></div>
       ) : error ? (
@@ -131,18 +132,38 @@ export function PortfolioView() {
             ))}</div> : <EmptyPortfolio title="No Hyped Token position." body="Only verified GETHYPED Hyped Token balances appear here." />
           )}
           {tab === "launches" && (
-            launches.length ? <div className="session-list onchain-list">{launches.map((market) => (
-              <Link href={`/market/${market.chain}/${market.token}`} key={`${market.chain}-${market.token}`}><div><strong>{market.name} <ChainBadge chain={market.chain} className="inline" /></strong><p>{market.symbol} · backed by {market.reserveSymbol}</p></div><span className="venue-status bond">Confirmed</span><span>Block {market.blockNumber}<small>{shortAddress(market.token)}</small></span><ArrowRight /></Link>
-            ))}</div> : <EmptyPortfolio title="No pool created by this wallet." body="Unfinished setups stay in Create a pool. Only confirmed Mint Club creator records appear here." />
+            launches.length ? <section className="portfolio-section">
+              <div className="section-heading portfolio-heading"><h2>Pools</h2><span>{launches.length} confirmed</span></div>
+              <div className="portfolio-table pool-table">
+                <div className="portfolio-table-head" aria-hidden="true"><span>Pool</span><span>Reserve</span><span>Network</span><span>Block</span><span>Action</span></div>
+                {launches.map((market) => (
+                  <Link className="portfolio-row" href={`/market/${market.chain}/${market.token}`} key={`${market.chain}-${market.token}`}>
+                    <div className="portfolio-market"><span className="token-chain-logo"><Image src={tokenLogoUrl(market.token, CHAINS[market.chain].id)} alt="" width={34} height={34} unoptimized /><ChainBadge chain={market.chain} /></span><span><strong>{market.symbol}</strong><small>{market.name}</small></span></div>
+                    <strong>{market.reserveSymbol}</strong>
+                    <span>{CHAINS[market.chain].shortName}</span>
+                    <b>{market.blockNumber}</b>
+                    <ArrowRight />
+                  </Link>
+                ))}
+              </div>
+            </section> : <EmptyPortfolio title="No pools." body="Confirmed pools created by this wallet appear here." />
           )}
           {tab === "activity" && (
-            activity.length ? <div className="activity-list">{activity.map((activity) => (
-              <a href={`${CHAINS[activity.chain].explorerUrl}/tx/${activity.transactionHash}`} key={`${activity.chain}-${activity.transactionHash}-${activity.type}`} target="_blank" rel="noreferrer">
-                <span className="activity-route"><span className={`activity-type ${activity.type.toLowerCase()}`}>{activity.type}</span><ChainBadge chain={activity.chain} /></span>
-                <div><strong>{amount(activity.tokenAmountRaw, activity.tokenDecimals)} {activity.tokenSymbol}</strong><p>{amount(activity.reserveAmountRaw, activity.reserveDecimals)} {activity.reserveSymbol}</p></div>
-                <small>Block {activity.blockNumber}</small><ExternalLink />
-              </a>
-            ))}</div> : <EmptyPortfolio title="No confirmed activity found." body="This view reads confirmed Hyped Token purchases and returns." />
+            activity.length ? <section className="portfolio-section">
+              <div className="section-heading portfolio-heading"><h2>Activity</h2><span>{activity.length} confirmed</span></div>
+              <div className="portfolio-table activity-table">
+                <div className="portfolio-table-head" aria-hidden="true"><span>Type</span><span>Token</span><span>Reserve</span><span>Block</span><span>Action</span></div>
+                {activity.map((item) => (
+                  <a className="portfolio-row" href={`${CHAINS[item.chain].explorerUrl}/tx/${item.transactionHash}`} key={`${item.chain}-${item.transactionHash}-${item.type}`} target="_blank" rel="noreferrer">
+                    <div className="portfolio-market"><span className={`activity-type ${item.type.toLowerCase()}`}>{item.type}</span><span><strong>{item.tokenSymbol}</strong><small>{CHAINS[item.chain].shortName}</small></span></div>
+                    <strong>{amount(item.tokenAmountRaw, item.tokenDecimals)} {item.tokenSymbol}</strong>
+                    <span>{amount(item.reserveAmountRaw, item.reserveDecimals)} {item.reserveSymbol}</span>
+                    <b>{item.blockNumber}</b>
+                    <ExternalLink />
+                  </a>
+                ))}
+              </div>
+            </section> : <EmptyPortfolio title="No activity." body="Confirmed buys and returns appear here." />
           )}
           <p className="source-note">Wallet {shortAddress(address)} · Live reads across supported networks</p>
         </>
