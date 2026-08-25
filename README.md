@@ -48,12 +48,12 @@ Historical charts explain how the two assets moved. They do **not** decide wheth
 - Uses real token logos with compact network marks.
 - Opens each market in the arbitrage view, with OG and Hyped Token trading available from the same detail page.
 
-### Continuous arbitrage
+### Arbitrage
 
 - Checks both Reserve Token round trips.
-- Lets the user set a maximum amount per execution and a cumulative limit.
-- Supports an optional end time; no end time means active until the user stops it.
-- Repeats profitable executions until stopped, expired or the cumulative limit is consumed.
+- Lets the user enter one Reserve Token amount and start from one action.
+- Uses that amount as both the V3 execution size and the total wallet permission.
+- Repeats checks only until the entered amount is filled or the user stops it.
 - Keeps user funds in the wallet between executions.
 - Returns Reserve Token principal and protected profit atomically in every successful transaction.
 - Reverts the complete transaction when the protected result cannot be returned.
@@ -67,7 +67,7 @@ The current immutable fee policy is:
 
 ### Portfolio and security
 
-- Shows active continuous strategies, realized Reserve Token profit and execution history.
+- Shows active arbitrage routes, realized Reserve Token profit and execution history.
 - Preserves earlier one-time V2 permissions so users can review and revoke them.
 - Reads verified deployment bytecode and contract boundaries from the selected network.
 - Keeps every wallet signature explicit.
@@ -99,7 +99,7 @@ The web application and keeper are intentionally separate:
 
 - **Vercel** serves the interface and request-response APIs.
 - **Keeper** is an always-on, permissionless process and must run on a persistent worker, VM or container.
-- **Executor contract** enforces the user's per-trade limit, cumulative limit, minimum profit and optional expiry.
+- **Executor contract** enforces the entered Reserve Token amount, protected profit and stop state.
 
 The keeper does not custody funds and has no privileged contract role. It only submits an execution that the immutable contract independently validates.
 
@@ -118,7 +118,7 @@ Public historical data may be cached. Wallet balances, permissions, strategy sta
 
 ## Base deployment
 
-The current continuous Reserve Token executor is verified on Base:
+The current V3 Reserve Token executor is verified on Base:
 
 - Contract: [`0xbB7AF71818fD1a269f21D0b5E4d8F7CF5401Ac3C`](https://basescan.org/address/0xbB7AF71818fD1a269f21D0b5E4d8F7CF5401Ac3C)
 - Deployment block: `50422622`
@@ -252,5 +252,5 @@ See [SECURITY.md](SECURITY.md) for responsible disclosure and production-key han
 
 ## Current network scope
 
-- Base: pool creation, markets, trade flows and continuous arbitrage executor.
-- Robinhood Chain: token discovery and pool creation are beta; the continuous executor is not presented as live until a separately verified deployment exists.
+- Base: pool creation, markets, trade flows and the V3 arbitrage executor.
+- Robinhood Chain: token discovery and pool creation are beta; arbitrage is not presented as live until a separately verified deployment exists.

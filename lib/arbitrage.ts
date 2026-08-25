@@ -193,6 +193,7 @@ export type ArbitrageOpportunityRoute = {
   direction: "Mint then sell" | "Buy then redeem";
   amountInRaw: string;
   amountOutRaw: string;
+  hAmountRaw?: string;
   grossDifferenceRaw: string;
   ownerDifferenceRaw: string;
   netReturnBps: number;
@@ -221,6 +222,12 @@ export type ArbitrageOpportunity = {
   hAmountRaw: string;
   protocolFeeBps: number;
   executorRewardBps: number;
+  priceBasis: {
+    reserveUsd: number | null;
+    mintClubUsd: number | null;
+    poolUsd: number | null;
+    hAmountRaw: string | null;
+  };
   bestDirection: ArbitrageOpportunityRoute["direction"] | null;
   routes: ArbitrageOpportunityRoute[];
   curveSamples: ArbitrageOpportunitySample[];

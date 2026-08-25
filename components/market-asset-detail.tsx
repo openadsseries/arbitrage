@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { ExternalLink } from "lucide-react";
 import { parseUnits } from "viem";
 import { ArbitragePriceGap } from "@/components/arbitrage-price-gap";
+import { MarketArbitrageHistory } from "@/components/market-arbitrage-history";
 import { MarketAutomationPanel } from "@/components/market-automation-panel";
 import { OgSwapPanel } from "@/components/og-swap-panel";
 import { QuickBuyPanel } from "@/components/quick-buy-panel";
@@ -40,6 +41,7 @@ export function MarketAssetDetail({
   const [view, setView] = useState<"arbitrage" | MarketAssetKind>("arbitrage");
   const [latestExecution, setLatestExecution] = useState<ReserveArbitrageExecution | null>(null);
   const [estimatedProfitRaw, setEstimatedProfitRaw] = useState<string | null>(null);
+  const [historyRefreshToken, setHistoryRefreshToken] = useState(0);
   const [arbitrageBudget, setArbitrageBudget] = useState("1");
   const arbitrageBudgetRaw = useMemo(() => {
     try {
@@ -87,24 +89,28 @@ export function MarketAssetDetail({
       </header>
 
       {view === "arbitrage" && (
-        <section className="arbitrage-focus market-workspace-face" aria-label={`${market.symbol} arbitrage`}>
-          <div className="arbitrage-story">
-            {marketsConnected
-              ? <ArbitragePriceGap market={market} latestExecution={latestExecution} checkedAmountRaw={quoteBudgetRaw} marketComparison={marketComparison} onEstimatedProfitChange={setEstimatedProfitRaw} />
-              : <div className="price-gap-view"><div className="price-gap-heading"><span className="kicker">Live quote</span><h2>Both markets are required.</h2><p>GETHYPED needs an executable price for both tokens before it can compare them.</p></div></div>}
-          </div>
-          <aside className="arbitrage-action">
-            <MarketAutomationPanel
-              market={market}
-              initialReadiness={arbitrageReadiness}
-              onExecutionChange={setLatestExecution}
-              budget={arbitrageBudget}
-              budgetRaw={arbitrageBudgetRaw}
-              onBudgetChange={setArbitrageBudget}
-              estimatedProfitRaw={estimatedProfitRaw}
-            />
-          </aside>
-        </section>
+        <>
+          <section className="arbitrage-focus market-workspace-face" aria-label={`${market.symbol} arbitrage`}>
+            <div className="arbitrage-story">
+              {marketsConnected
+                ? <ArbitragePriceGap market={market} checkedAmountRaw={quoteBudgetRaw} marketComparison={marketComparison} onEstimatedProfitChange={setEstimatedProfitRaw} />
+                : <div className="price-gap-view"><div className="price-gap-heading"><span className="kicker">Live quote</span><h2>Both markets are required.</h2><p>GETHYPED needs an executable price for both tokens before it can compare them.</p></div></div>}
+            </div>
+            <aside className="arbitrage-action">
+              <MarketAutomationPanel
+                market={market}
+                initialReadiness={arbitrageReadiness}
+                onExecutionChange={setLatestExecution}
+                onPositionChange={() => setHistoryRefreshToken((value) => value + 1)}
+                budget={arbitrageBudget}
+                budgetRaw={arbitrageBudgetRaw}
+                onBudgetChange={setArbitrageBudget}
+                estimatedProfitRaw={estimatedProfitRaw}
+              />
+            </aside>
+          </section>
+          <MarketArbitrageHistory market={market} latestExecution={latestExecution} refreshSignal={historyRefreshToken} />
+        </>
       )}
 
       {view !== "arbitrage" && <section key={`trade-${asset}`} className="market-price-section with-trade market-workspace-face" aria-label={`Trade ${selected.symbol}`}>

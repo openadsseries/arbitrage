@@ -112,7 +112,7 @@ export function LaunchStarter({ trendingTokens }: { trendingTokens: TrendingToke
               </button>
             ))}
           </div>
-          <p className="trending-source">24h movers from GeckoTerminal · Updated every 10 minutes</p>
+          <p className="trending-source">24h movers from GeckoTerminal · Server-cached for 10 minutes</p>
         </section>
       )}
     </div>

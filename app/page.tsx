@@ -1,13 +1,34 @@
 import Link from "next/link";
-import { ArrowDown, ArrowRight, Database, LockKeyhole, WalletCards } from "lucide-react";
+import { unstable_cache } from "next/cache";
+import { ArrowRight, Database, LockKeyhole, WalletCards } from "lucide-react";
 import { LaunchFlowVisual } from "@/components/launch-flow-visual";
 import { PriceCoMovementChart } from "@/components/price-co-movement-chart";
 import { TokenLogo } from "@/components/token-logo";
+import { readArbitrageMarketReadiness } from "@/lib/server/arbitrage";
+import { readMarketComparison, type MarketComparisonState } from "@/lib/server/gecko-comparison";
 
 const BNKR_ADDRESS = "0x22aF33FE49fD1Fa80c7149773dDe5890D3c76F3b";
 const HBNKR_ADDRESS = "0x94FF3398d08bb859E0D2CdC7A3F938AA7B109069";
+const HMT_ADDRESS = "0x467bA2Da859648dc7C258BcF6572adE499250E6a";
 const BASE_WETH_ADDRESS = "0x4200000000000000000000000000000000000006";
 const BASE_USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+
+const readHomeHmtComparison = unstable_cache(
+  async (): Promise<MarketComparisonState> => {
+    const readiness = await readArbitrageMarketReadiness("base", HMT_ADDRESS);
+    return readMarketComparison({
+      chain: "base",
+      og: readiness.originalMarket.pool
+        ? { token: readiness.reserveToken, pool: readiness.originalMarket.pool }
+        : null,
+      hyped: readiness.hypedMarket.pool
+        ? { token: readiness.hToken, pool: readiness.hypedMarket.pool }
+        : null,
+    });
+  },
+  ["home-hmt-comparison-v1"],
+  { revalidate: 86_400 },
+);
 
 function QuoteAssetChoice() {
   return (
@@ -22,20 +43,22 @@ function QuoteAssetChoice() {
   );
 }
 
-export default function HomePage() {
+export default async function HomePage() {
+  const hmtComparison = await readHomeHmtComparison().catch(() => null);
+
   return (
     <main className="home page-shell">
       <section className="home-hero" aria-labelledby="hero-title">
         <div className="hero-message">
-          <span className="kicker">The connected-market engine</span>
-          <h1 id="hero-title">Turn one token into two connected markets.</h1>
-          <p className="hero-copy">Create a Hyped Token backed by an existing token, then connect it to an independent pool.</p>
+          <span className="kicker">Connected-market arbitrage</span>
+          <h1 id="hero-title">Create the market. Track the gap.</h1>
+          <p className="hero-copy">GETHYPED creates the paired Hyped Token market, compares both prices, and opens the route when an arbitrage gap appears.</p>
           <div className="hero-actions">
             <Link className="hero-primary" href="/launch">Create a pool <ArrowRight size={15} /></Link>
-            <a className="hero-secondary" href="#mechanism">See the mechanism <ArrowDown size={15} /></a>
+            <Link className="hero-secondary" href="/markets">View markets <ArrowRight size={15} /></Link>
           </div>
         </div>
-        <PriceCoMovementChart />
+        <PriceCoMovementChart hmtComparison={hmtComparison ?? undefined} />
       </section>
 
       <section className="mechanism-section" id="mechanism" aria-labelledby="mechanism-title">

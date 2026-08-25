@@ -238,6 +238,20 @@ async function readFeePolicy() {
   return [protocolFeeBps, rewardBps];
 }
 
+async function readFeePolicyWithRetry() {
+  let nextPollMs = POLL_MS;
+  while (true) {
+    try {
+      return await readFeePolicy();
+    } catch (error) {
+      console.error(`[keeper] fee policy read delayed: ${conciseError(error)}`);
+      if (RUN_ONCE) return null;
+      await wait(nextPollMs);
+      nextPollMs = Math.min(nextPollMs * 2, MAX_POLL_MS);
+    }
+  }
+}
+
 async function poll(protocolFeeBps, rewardBps) {
   try {
     const [count, block] = await Promise.all([
@@ -282,15 +296,21 @@ async function poll(protocolFeeBps, rewardBps) {
 }
 
 console.log(`[keeper] watching continuous Reserve Token executor ${executor} on Base as ${account.address}`);
-const [protocolFeeBps, rewardBps] = await readFeePolicy();
-console.log(`[keeper] policy verified: protocol=${Number(protocolFeeBps) / 100}% executor=${Number(rewardBps) / 100}%`);
-let nextPollMs = POLL_MS;
-while (true) {
-  const healthy = await poll(protocolFeeBps, rewardBps);
-  if (RUN_ONCE) {
-    console.log(`[keeper] one check completed: ${healthy ? "healthy" : "failed"}`);
-    break;
+const feePolicy = await readFeePolicyWithRetry();
+if (!feePolicy) {
+  console.log("[keeper] one check completed: failed");
+  process.exitCode = 1;
+} else {
+  const [protocolFeeBps, rewardBps] = feePolicy;
+  console.log(`[keeper] policy verified: protocol=${Number(protocolFeeBps) / 100}% executor=${Number(rewardBps) / 100}%`);
+  let nextPollMs = POLL_MS;
+  while (true) {
+    const healthy = await poll(protocolFeeBps, rewardBps);
+    if (RUN_ONCE) {
+      console.log(`[keeper] one check completed: ${healthy ? "healthy" : "failed"}`);
+      break;
+    }
+    nextPollMs = healthy ? POLL_MS : Math.min(nextPollMs * 2, MAX_POLL_MS);
+    await wait(nextPollMs);
   }
-  nextPollMs = healthy ? POLL_MS : Math.min(nextPollMs * 2, MAX_POLL_MS);
-  await wait(nextPollMs);
 }

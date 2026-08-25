@@ -36,6 +36,13 @@ function marketFor(markets: VerifiedMarket[], hToken: Address) {
   return markets.find((market) => market.chain === "base" && market.token.toLowerCase() === hToken.toLowerCase());
 }
 
+function actionError(reason: unknown, fallback: string) {
+  const message = reason instanceof Error ? reason.message : String(reason || fallback);
+  if (/over rate limit|rate.?limit|too many requests|429/i.test(message)) return "Base RPC is busy. Wait a moment and try again.";
+  if (/rpc request failed|http request failed|failed to fetch|network request/i.test(message)) return "The Base read was interrupted. Try again.";
+  return message;
+}
+
 export function ArbitragePortfolio({ wallet, markets }: { wallet: Address; markets: VerifiedMarket[] }) {
   const walletState = useWallet();
   const [continuous, setContinuous] = useState<ContinuousArbitrageSnapshot | null>(null);
@@ -56,7 +63,7 @@ export function ArbitragePortfolio({ wallet, markets }: { wallet: Address; marke
       nextResponse.json() as Promise<{ snapshot?: ReserveArbitrageSnapshot; error?: string }>,
       legacyResponse.json() as Promise<{ snapshot?: ArbitrageSnapshot; error?: string }>,
     ]);
-    if (!continuousResponse.ok || !continuousPayload.snapshot) throw new Error(continuousPayload.error ?? "Could not read continuous arbitrage.");
+    if (!continuousResponse.ok || !continuousPayload.snapshot) throw new Error(continuousPayload.error ?? "Could not read arbitrage.");
     setContinuous(continuousPayload.snapshot);
     if (nextResponse.ok && nextPayload.snapshot) setSnapshot(nextPayload.snapshot);
     if (legacyResponse.ok && legacyPayload.snapshot) setLegacy(legacyPayload.snapshot);
@@ -75,14 +82,14 @@ export function ArbitragePortfolio({ wallet, markets }: { wallet: Address; marke
           nextResponse.json() as Promise<{ snapshot?: ReserveArbitrageSnapshot; error?: string }>,
           legacyResponse.json() as Promise<{ snapshot?: ArbitrageSnapshot; error?: string }>,
         ]);
-        if (!continuousResponse.ok || !continuousPayload.snapshot) throw new Error(continuousPayload.error ?? "Could not read continuous arbitrage.");
+        if (!continuousResponse.ok || !continuousPayload.snapshot) throw new Error(continuousPayload.error ?? "Could not read arbitrage.");
         if (!active) return;
         setContinuous(continuousPayload.snapshot);
         if (nextResponse.ok && nextPayload.snapshot) setSnapshot(nextPayload.snapshot);
         if (legacyResponse.ok && legacyPayload.snapshot) setLegacy(legacyPayload.snapshot);
       })
       .catch((reason) => {
-        if (active) setError(reason instanceof Error ? reason.message : "Could not read arbitrage.");
+        if (active) setError(actionError(reason, "Could not read arbitrage."));
       });
     return () => { active = false; };
   }, [wallet]);
@@ -107,10 +114,10 @@ export function ArbitragePortfolio({ wallet, markets }: { wallet: Address; marke
       const revokeHash = await walletClient.writeContract(revoke.request);
       const revokeReceipt = await publicClient.waitForTransactionReceipt({ hash: revokeHash });
       if (revokeReceipt.status !== "success") throw new Error("Arbitrage stopped, but the remaining token permission was not removed.");
-      setMessage("Continuous arbitrage stopped and its token permission was removed.");
+      setMessage("Arbitrage stopped and its token permission was removed.");
       await refresh();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not stop continuous arbitrage.");
+      setError(actionError(reason, "Could not stop arbitrage."));
       await refresh().catch(() => undefined);
     } finally {
       setBusy(false);
@@ -174,7 +181,7 @@ export function ArbitragePortfolio({ wallet, markets }: { wallet: Address; marke
 
   if (!continuous) return <div className="empty-state compact"><LoaderCircle className="spin" /><h2>Reading arbitrage</h2><p>Only confirmed contract state is shown.</p></div>;
 
-  if (!continuous.configured) return <section className="automation-unavailable"><ShieldCheck /><div><span className="kicker">Continuous arbitrage</span><h2>Continuous arbitrage is not live on Base yet.</h2><p>No wallet permission is requested until the continuous executor is deployed and verified.</p></div></section>;
+  if (!continuous.configured) return <section className="automation-unavailable"><ShieldCheck /><div><span className="kicker">Arbitrage</span><h2>Arbitrage is not live on Base yet.</h2><p>No wallet permission is requested until the V3 executor is deployed and verified.</p></div></section>;
 
   return (
     <div className="automation-page">
@@ -185,19 +192,19 @@ export function ArbitragePortfolio({ wallet, markets }: { wallet: Address; marke
       </section>
 
       <section className="automation-list-section">
-        <div className="section-heading"><h2>Continuous arbitrage</h2><span>It keeps checking until you stop it or its limit is used.</span></div>
+        <div className="section-heading"><h2>Arbitrage</h2><span>Each active route uses only its approved Reserve Token amount.</span></div>
         {continuous.strategies.length ? <div className="automation-list">{continuous.strategies.map((strategy) => {
           const market = marketFor(markets, strategy.hToken);
           const live = strategy.active && BigInt(strategy.remainingVolumeRaw) > 0n && (strategy.validUntil === 0 || strategy.validUntil > continuous.readTimestamp);
           const decimals = market?.reserveDecimals ?? 18;
           const symbol = market?.reserveSymbol ?? "Reserve";
           return <article key={strategy.id}>
-            <div className="automation-market"><Image src={tokenLogoUrl(strategy.hToken, CHAINS.base.id)} alt="" width={38} height={38} unoptimized /><span><strong>{market ? `${market.reserveSymbol} ↔ ${market.symbol}` : shortAddress(strategy.hToken)}</strong><small>{tokenAmount(strategy.maxReservePerExecutionRaw, decimals)} {symbol} per trade · {tokenAmount(strategy.remainingVolumeRaw, decimals)} {symbol} remaining</small></span></div>
+            <div className="automation-market"><Image src={tokenLogoUrl(strategy.hToken, CHAINS.base.id)} alt="" width={38} height={38} unoptimized /><span><strong>{market ? `${market.reserveSymbol} ↔ ${market.symbol}` : shortAddress(strategy.hToken)}</strong><small>{tokenAmount(strategy.remainingVolumeRaw, decimals)} {symbol} left</small></span></div>
             <span className={live ? "automation-live" : "automation-off"}>{live ? "Running" : strategy.active ? "Expired" : "Stopped"}</span>
             <time>{strategy.validUntil === 0 ? `${strategy.executionCount} executions` : new Date(strategy.validUntil * 1000).toLocaleString("en-US")}</time>
             {live ? <button disabled={busy} onClick={() => void stopContinuous(strategy.id, strategy.reserveToken)} type="button"><Pause /> Stop</button> : market ? <Link className="automation-row-link" href={`/market/base/${market.token}`}>Open <ArrowRight /></Link> : null}
           </article>;
-        })}</div> : <div className="empty-state compact"><ShieldCheck /><h2>No continuous arbitrage yet.</h2><p>Open a supported market, check the live return, and start from there.</p></div>}
+        })}</div> : <div className="empty-state compact"><ShieldCheck /><h2>No arbitrage yet.</h2><p>Open a supported market, check the live return, and start from there.</p></div>}
       </section>
 
       {message && <div className="automation-message"><CheckCircle2 /><span>{message}</span></div>}

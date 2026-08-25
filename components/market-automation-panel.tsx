@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, LoaderCircle, Pause, Play, ShieldCheck } from "lucide-react";
+import { CheckCircle2, Info, LoaderCircle, Pause, Play, ShieldCheck, X } from "lucide-react";
 import { encodeFunctionData, formatUnits, type Address } from "viem";
 import { useWallet } from "@/components/wallet-provider";
 import {
@@ -34,6 +34,8 @@ function reserveAmount(raw: string, decimals: number) {
 function errorMessage(reason: unknown, fallback: string) {
   const simplify = (message: string) => {
     if (/user denied|user rejected|request signature/i.test(message)) return "Wallet approval was cancelled.";
+    if (/over rate limit|rate.?limit|too many requests|429/i.test(message)) return "Base RPC is busy. Wait a moment and try again.";
+    if (/rpc request failed/i.test(message)) return "The Base read was interrupted. Try again.";
     if (/http request failed|failed to fetch|network request/i.test(message)) return "The Base read was interrupted. Try again.";
     return message;
   };
@@ -51,6 +53,7 @@ export function MarketAutomationPanel({
   market,
   initialReadiness,
   onExecutionChange,
+  onPositionChange,
   budget,
   budgetRaw,
   onBudgetChange,
@@ -59,6 +62,7 @@ export function MarketAutomationPanel({
   market: VerifiedMarket;
   initialReadiness: ArbitrageMarketReadiness | null;
   onExecutionChange?: (execution: ReserveArbitrageExecution | null) => void;
+  onPositionChange?: () => void;
   budget: string;
   budgetRaw: bigint | null;
   onBudgetChange: (value: string) => void;
@@ -76,10 +80,7 @@ export function MarketAutomationPanel({
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [showRevoke, setShowRevoke] = useState(false);
-  const [totalLimit, setTotalLimit] = useState("");
-  const [totalLimitEdited, setTotalLimitEdited] = useState(false);
-  const [hasEndTime, setHasEndTime] = useState(false);
-  const [endHours, setEndHours] = useState("24");
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   const readSnapshot = useCallback(async (address: Address) => {
     const response = await fetch(`/api/arbitrage/v3?wallet=${address}`, { cache: "no-store" });
@@ -170,35 +171,12 @@ export function MarketAutomationPanel({
       .map((strategy) => strategy.id));
     return activeSnapshot.executions.find((execution) => strategyIds.has(execution.strategyId)) ?? null;
   }, [activeSnapshot, market.token]);
-  const displayedTotalLimit = totalLimitEdited
-    ? totalLimit
-    : budgetRaw === null
-      ? ""
-      : formatUnits(budgetRaw * 10n, market.reserveDecimals);
-  const totalLimitRaw = useMemo(() => {
-    try {
-      if (!displayedTotalLimit.trim() || Number(displayedTotalLimit) <= 0) return null;
-      const [whole = "", fraction = ""] = displayedTotalLimit.trim().split(".");
-      if (!/^\d+$/.test(whole) || !/^\d*$/.test(fraction) || fraction.length > market.reserveDecimals) return null;
-      return BigInt(`${whole}${fraction.padEnd(market.reserveDecimals, "0")}`);
-    } catch {
-      return null;
-    }
-  }, [displayedTotalLimit, market.reserveDecimals]);
-  const endHoursNumber = Number(endHours);
+  const totalLimitRaw = budgetRaw;
   const budgetError = budgetRaw === null
-    ? "Enter a valid budget."
+    ? "Enter a valid amount."
     : reserveBalanceRaw !== null && budgetRaw > reserveBalanceRaw
       ? `Not enough ${market.reserveSymbol} in this wallet.`
       : "";
-  const totalLimitError = totalLimitRaw === null
-    ? "Enter a valid total limit."
-    : budgetRaw !== null && totalLimitRaw < budgetRaw
-      ? "Total limit must cover at least one trade."
-      : "";
-  const endTimeError = hasEndTime && (!Number.isFinite(endHoursNumber) || endHoursNumber <= 0)
-    ? "Enter a valid duration."
-    : "";
   const minimumProfitRaw = getArbitrageMinimumProfit(budgetRaw ?? 0n);
   const permissionRemaining = !running && reserveAllowanceRaw > 0n;
   const runningExecutions = useMemo(() => activeSnapshot?.executions.filter(
@@ -225,7 +203,7 @@ export function MarketAutomationPanel({
   }, [preparation, refreshWalletState, running, wallet.address]);
 
   async function start() {
-    if (!preparation || budgetRaw === null || totalLimitRaw === null || budgetError || totalLimitError || endTimeError) return;
+    if (!preparation || budgetRaw === null || totalLimitRaw === null || budgetError) return;
     setBusy(true);
     setProgress("Connecting wallet");
     setError("");
@@ -235,7 +213,7 @@ export function MarketAutomationPanel({
       const address = wallet.address ?? await wallet.connect("base");
       if (!address) throw new Error("Connect a wallet to start arbitrage.");
       const currentSnapshot = wallet.address && activeSnapshot ? activeSnapshot : await readSnapshot(address);
-      if (!currentSnapshot.configured || !currentSnapshot.executor) throw new Error("Continuous arbitrage is not available yet.");
+      if (!currentSnapshot.configured || !currentSnapshot.executor) throw new Error("Arbitrage is not available yet.");
 
       const publicClient = await wallet.getPublicClient("base");
       const walletClient = await wallet.getWalletClient("base");
@@ -244,9 +222,7 @@ export function MarketAutomationPanel({
         publicClient.readContract({ address: preparation.reserveToken, abi: ERC20_PERMISSION_ABI, functionName: "allowance", args: [address, currentSnapshot.executor] }),
       ]);
       if (balance < budgetRaw) throw new Error(`Not enough ${market.reserveSymbol} in this wallet.`);
-      const validUntil = hasEndTime
-        ? Math.floor(Date.now() / 1_000) + Math.floor(endHoursNumber * 60 * 60)
-        : 0;
+      const validUntil = 0;
       const startCall = {
         to: currentSnapshot.executor,
         data: encodeFunctionData({
@@ -297,8 +273,9 @@ export function MarketAutomationPanel({
         if (receipt.status !== "success") throw new Error("Arbitrage did not start.");
       }
       setShowRevoke(false);
-      setMessage("Continuous arbitrage started.");
+      setMessage("Arbitrage started.");
       await refreshWalletState(address, preparation);
+      onPositionChange?.();
     } catch (reason) {
       if (approvalMayRemain) setShowRevoke(true);
       setError(errorMessage(reason, "Could not start arbitrage."));
@@ -358,6 +335,7 @@ export function MarketAutomationPanel({
       setReserveAllowanceRaw(0n);
       setMessage("Arbitrage stopped and permission removed.");
       await refreshWalletState(wallet.address, preparation);
+      onPositionChange?.();
     } catch (reason) {
       setShowRevoke(true);
       setError(errorMessage(reason, "Could not stop arbitrage and remove permission."));
@@ -381,6 +359,7 @@ export function MarketAutomationPanel({
       setShowRevoke(false);
       setReserveAllowanceRaw(0n);
       setMessage(`${market.reserveSymbol} permission removed.`);
+      onPositionChange?.();
     } catch (reason) {
       setError(errorMessage(reason, "Could not remove the wallet limit."));
     } finally {
@@ -398,38 +377,20 @@ export function MarketAutomationPanel({
 
   return <section className="market-auto-panel">
     {running ? <>
-      <div className="market-auto-status"><span><i /> Running</span><small>{running.validUntil === 0 ? "Until you stop" : `Ends ${new Date(running.validUntil * 1_000).toLocaleString("en-US")}`}</small></div>
-      <h2>Continuous arbitrage is on.</h2>
+      <div className="market-auto-status"><span><i /> Running</span><small>Until filled or stopped</small></div>
+      <h2>Arbitrage is on.</h2>
       <dl className="market-auto-summary">
         <div><dt>Total profit</dt><dd className="positive">+{reserveAmount(totalProfitRaw.toString(), market.reserveDecimals)} {market.reserveSymbol}</dd></div>
         <div><dt>Executions</dt><dd>{running.executionCount}</dd></div>
-        <div><dt>Remaining limit</dt><dd>{reserveAmount(running.remainingVolumeRaw, market.reserveDecimals)} {market.reserveSymbol}</dd></div>
-        <div><dt>Budget per trade</dt><dd>{reserveAmount(running.maxReservePerExecutionRaw, market.reserveDecimals)} {market.reserveSymbol}</dd></div>
+        <div><dt>Amount left</dt><dd>{reserveAmount(running.remainingVolumeRaw, market.reserveDecimals)} {market.reserveSymbol}</dd></div>
       </dl>
       <button className="market-auto-stop" disabled={busy} onClick={() => void stopAndRevoke()} type="button">{busy ? <LoaderCircle className="spin" /> : <Pause />} {busy ? progress : "Stop and remove permission"}</button>
     </> : <>
-      <span className="kicker">2 · Start continuous arbitrage</span>
+      <span className="kicker">2 · Start arbitrage</span>
       <div className="market-auto-budget">
-        <label htmlFor="arbitrage-budget">Budget per trade</label>
+        <label htmlFor="arbitrage-budget">Amount</label>
         <div className="market-auto-budget-input">
           <input id="arbitrage-budget" inputMode="decimal" min="0" onChange={(event) => onBudgetChange(event.target.value)} placeholder="1" step="any" type="number" value={budget} />
-          <span>{market.reserveSymbol}</span>
-        </div>
-        <label htmlFor="arbitrage-total-limit">Total limit</label>
-        <div className="market-auto-budget-input">
-          <input
-            id="arbitrage-total-limit"
-            inputMode="decimal"
-            min="0"
-            onChange={(event) => {
-              setTotalLimitEdited(true);
-              setTotalLimit(event.target.value);
-            }}
-            placeholder="1000"
-            step="any"
-            type="number"
-            value={displayedTotalLimit}
-          />
           <span>{market.reserveSymbol}</span>
         </div>
         <dl className="market-auto-budget-meta">
@@ -443,31 +404,39 @@ export function MarketAutomationPanel({
           </div>
         </dl>
         {budgetError && <em>{budgetError}</em>}
-        {!budgetError && totalLimitError && <em>{totalLimitError}</em>}
-        {!budgetError && !totalLimitError && endTimeError && <em>{endTimeError}</em>}
       </div>
-      <button className="button-primary automation-action" disabled={busy || !preparation || Boolean(budgetError || totalLimitError || endTimeError)} onClick={() => void start()} type="button">
-        {busy ? <LoaderCircle className="spin" /> : <Play />} {busy ? progress : preparation ? "Start continuous arbitrage" : "Preparing"}
+      <button className="button-primary automation-action" disabled={busy || !preparation || Boolean(budgetError)} onClick={() => void start()} type="button">
+        {busy ? <LoaderCircle className="spin" /> : <Play />} {busy ? progress : preparation ? "Start arbitrage" : "Preparing"}
       </button>
-      <p className="market-auto-policy">Checks both routes repeatedly. Funds stay in your wallet between executions.</p>
     </>}
 
     {message && <div className="market-auto-message"><CheckCircle2 /> {message}</div>}
     {error && <div className="market-auto-error"><ShieldCheck /> {error}</div>}
     {(showRevoke || permissionRemaining) && !running && <button className="market-auto-revoke" disabled={busy} onClick={() => void revoke()} type="button">Remove remaining permission</button>}
-    <details className="market-auto-details">
-      <summary>Details</summary>
-      {!running && <label className="market-auto-end-time">
-        <span><input checked={hasEndTime} onChange={(event) => setHasEndTime(event.target.checked)} type="checkbox" /> Set an end time</span>
-        {hasEndTime && <span className="market-auto-end-input"><input inputMode="decimal" min="1" onChange={(event) => setEndHours(event.target.value)} step="1" type="number" value={endHours} /> hours</span>}
-      </label>}
-      <p>Each execution must return the principal and protected profit in {market.reserveSymbol}. The total limit bounds cumulative use.</p>
-      <dl>
-        <div><dt>GETHYPED fee</dt><dd>{(activeSnapshot?.protocolFeeBps ?? 0) / 100}%</dd></div>
-        <div><dt>Successful executor</dt><dd>{(activeSnapshot?.executorRewardBps ?? 2_000) / 100}% of profit</dd></div>
-        {activeSnapshot?.executor && <div><dt>Executor</dt><dd>{shortAddress(activeSnapshot.executor)}</dd></div>}
-      </dl>
-    </details>
+    <button className="market-details-trigger" onClick={() => setDetailsOpen(true)} type="button"><Info /> Details</button>
+    {detailsOpen && <div className="market-details-layer" role="presentation" onMouseDown={() => setDetailsOpen(false)}>
+      <section className="market-details-dialog" aria-label="Arbitrage details" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
+        <button className="market-details-close" aria-label="Close details" onClick={() => setDetailsOpen(false)} type="button"><X /></button>
+        <span className="kicker">Details</span>
+        <h2>Arbitrage checks</h2>
+        <div className="market-details-grid">
+          <div><strong>Price movement</strong><p>The chart uses daily USD closes. A wider gap only triggers a live route check.</p></div>
+          <div><strong>Profit number</strong><p>The percent comes from the current executable route after price impact, exchange fees and executor reward.</p></div>
+          <div><strong>When {market.symbol} is high</strong><p>The route mints {market.symbol} in Mint Club, then sells it in the pool.</p></div>
+          <div><strong>When {market.symbol} is low</strong><p>The route buys {market.symbol} in the pool, then returns it to Mint Club.</p></div>
+          <div><strong>Wallet permission</strong><p>Only the entered {market.reserveSymbol} amount is approved. Funds stay in your wallet until execution.</p></div>
+          <div><strong>Execution</strong><p>The V3 executor can run only if principal and protected profit return in {market.reserveSymbol}; otherwise it reverts.</p></div>
+          <div><strong>Gas</strong><p>Gas coverage is checked again at execution. It is not deducted from the displayed quote.</p></div>
+          <div><strong>Stop</strong><p>The position ends when the amount is filled or when you stop and remove permission.</p></div>
+        </div>
+        <dl>
+          <div><dt>GETHYPED fee</dt><dd>{(activeSnapshot?.protocolFeeBps ?? 0) / 100}%</dd></div>
+          <div><dt>Successful executor</dt><dd>{(activeSnapshot?.executorRewardBps ?? 2_000) / 100}% of profit</dd></div>
+          <div><dt>User share</dt><dd>{100 - (activeSnapshot?.protocolFeeBps ?? 0) / 100 - (activeSnapshot?.executorRewardBps ?? 2_000) / 100}% of profit</dd></div>
+          {activeSnapshot?.executor && <div><dt>Executor</dt><dd>{shortAddress(activeSnapshot.executor)}</dd></div>}
+        </dl>
+      </section>
+    </div>}
   </section>;
 }
 

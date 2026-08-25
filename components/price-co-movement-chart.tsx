@@ -1,9 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Info } from "lucide-react";
+import { ArrowRight, ArrowRightLeft, Info } from "lucide-react";
 import Image from "next/image";
+import Link from "next/link";
 import { tokenLogoUrl } from "@/components/token-logo";
+import type { MarketComparisonState } from "@/lib/server/gecko-comparison";
 
 type Point = { t: number; og: number; h: number };
 type Timeframe = "hour" | "day";
@@ -16,6 +18,16 @@ type MarketSnapshot = {
   sourceUrl: string;
   data: Record<Timeframe, Point[]>;
 };
+
+function livePoints(comparison: MarketComparisonState | null | undefined): Point[] | null {
+  if (comparison?.status !== "ready") return null;
+  const points = comparison.data.points.map((point) => ({
+    t: point.timestamp,
+    og: point.og,
+    h: point.hyped,
+  }));
+  return points.length >= 2 ? points : null;
+}
 
 const DICKBUTT_SNAPSHOT: Record<Timeframe, Point[]> = {
   hour: [
@@ -170,11 +182,15 @@ function change(value: number) {
   return `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}%`;
 }
 
-export function PriceCoMovementChart() {
+export function PriceCoMovementChart({ hmtComparison }: { hmtComparison?: MarketComparisonState }) {
   const [marketKey, setMarketKey] = useState<MarketKey>("hMT");
   const [timeframe, setTimeframe] = useState<Timeframe>("day");
+  const liveHmtDay = useMemo(() => livePoints(hmtComparison), [hmtComparison]);
   const market = MARKETS[marketKey];
-  const points = market.data[timeframe];
+  const points = marketKey === "hMT" && timeframe === "day" && liveHmtDay
+    ? liveHmtDay
+    : market.data[timeframe];
+  const usingLiveHmt = marketKey === "hMT" && timeframe === "day" && Boolean(liveHmtDay);
   const chart = useMemo(() => {
     const allValues = points.flatMap((point) => [point.og, point.h]);
     const rawMin = Math.min(...allValues);
@@ -205,8 +221,9 @@ export function PriceCoMovementChart() {
     <section className="co-movement" aria-labelledby="co-movement-title">
       <div className="co-movement-head">
         <div>
-          <span>Historical market snapshot</span>
-          <h2 id="co-movement-title">The OG and its Hyped Token.</h2>
+          <span>Market / arbitrage preview</span>
+          <h2 id="co-movement-title">{market.ogSymbol} ↔ {market.hypedSymbol}</h2>
+          <p>Daily prices here. Live profit check in Markets.</p>
         </div>
         <div className="chart-controls">
           <div className="timeframe-tabs" role="tablist" aria-label="Chart candle interval">
@@ -217,15 +234,15 @@ export function PriceCoMovementChart() {
             <summary aria-label="How to read this chart"><Info size={13} /><span>Details</span></summary>
             <div>
               <strong>Chart details</strong>
-              <p>Both USD price series are normalized to the same starting point, so their direction can be compared despite different token prices.</p>
+              <p>This homepage preview keeps the chart light. Open Markets for the executable quote, route and wallet action.</p>
               <dl>
-                <div><dt>Normalization</dt><dd>Start = 100</dd></div>
+                <div><dt>Chart</dt><dd>Daily index</dd></div>
                 <div><dt>Interval</dt><dd>{timeframe === "hour" ? "1-hour traded candles" : "1-day candles"}</dd></div>
-                <div><dt>Captured</dt><dd>Aug 20, 2026</dd></div>
-                <div><dt>Source</dt><dd>GeckoTerminal Base OHLCV</dd></div>
+                <div><dt>Captured</dt><dd>{usingLiveHmt ? "Server-cached daily" : "Aug 20, 2026"}</dd></div>
+                <div><dt>Source</dt><dd>{usingLiveHmt ? "Live GeckoTerminal daily OHLCV" : "GeckoTerminal Base OHLCV"}</dd></div>
               </dl>
-              <p>Each line connects the captured historical close observations in chronological order. Missing intervals are not filled with generated data.</p>
-              <p>Historical snapshot · User-requested examples · Not guaranteed performance.</p>
+              <p>Each line connects captured close observations in chronological order. Missing intervals are not filled with generated data.</p>
+              <p>{usingLiveHmt ? "Server-cached daily · No browser polling · Not guaranteed performance." : "Historical snapshot · User-requested examples · Not guaranteed performance."}</p>
               <a href={market.sourceUrl} target="_blank" rel="noreferrer">View token on Mint Club ↗</a>
             </div>
           </details>
@@ -244,11 +261,11 @@ export function PriceCoMovementChart() {
       <div className="co-movement-values">
         <div className="series-value og">
           <span className="series-identity"><Image src={tokenLogoUrl(market.ogTokenAddress)} alt={`${market.ogSymbol} token logo`} width={30} height={30} unoptimized /><strong>{market.ogSymbol}</strong></span>
-          <div className="series-metric"><strong>{latest.og.toFixed(1)}</strong><small>Index</small><b className={latest.og >= 100 ? "up" : "down"}>{change(latest.og)}</b></div>
+          <div className="series-metric"><strong>{latest.og.toFixed(1)}</strong><small>Daily index</small><b className={latest.og >= 100 ? "up" : "down"}>{change(latest.og)}</b></div>
         </div>
         <div className="series-value hyped">
           <span className="series-identity"><Image src={tokenLogoUrl(market.tokenAddress)} alt={`${market.hypedSymbol} token logo`} width={30} height={30} unoptimized /><strong>{market.hypedSymbol}</strong></span>
-          <div className="series-metric"><strong>{latest.h.toFixed(1)}</strong><small>Index</small><b className={latest.h >= 100 ? "up" : "down"}>{change(latest.h)}</b></div>
+          <div className="series-metric"><strong>{latest.h.toFixed(1)}</strong><small>Daily index</small><b className={latest.h >= 100 ? "up" : "down"}>{change(latest.h)}</b></div>
         </div>
       </div>
 
@@ -266,6 +283,19 @@ export function PriceCoMovementChart() {
             <text x={CHART.right} y="274" textAnchor="end">{formatDate(latest.t)}</text>
           </g>
         </svg>
+      </div>
+
+      <div className="home-arbitrage-preview">
+        <span>Arbitrage path</span>
+        <div className="home-arbitrage-path">
+          <span><Image src={tokenLogoUrl(market.ogTokenAddress)} alt="" width={22} height={22} unoptimized /><b>{market.ogSymbol}</b></span>
+          <ArrowRight />
+          <span className="hyped"><Image src={tokenLogoUrl(market.tokenAddress)} alt="" width={22} height={22} unoptimized /><b>{market.hypedSymbol}</b></span>
+          <ArrowRight />
+          <span><Image src={tokenLogoUrl(market.tokenAddress)} alt="" width={22} height={22} unoptimized /><ArrowRightLeft /><Image src={tokenLogoUrl(market.ogTokenAddress)} alt="" width={22} height={22} unoptimized /></span>
+          <ArrowRight />
+          <Link href={`/market/base/${market.tokenAddress}`}>Check</Link>
+        </div>
       </div>
 
       <div className="chart-foot">

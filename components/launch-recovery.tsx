@@ -1,20 +1,35 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useEffect, useState } from "react";
-import { ArrowRight, RotateCcw } from "lucide-react";
+import { ArrowRight, RotateCcw, Trash2 } from "lucide-react";
 import { ChainBadge } from "@/components/chain-badge";
+import { tokenLogoUrl } from "@/components/token-logo";
 import { relativeTime } from "@/lib/format";
-import { readManifests } from "@/lib/manifest";
+import { deleteManifest, readManifests } from "@/lib/manifest";
 import type { LaunchManifest } from "@/lib/types";
+
+function unfinishedManifests() {
+  return readManifests()
+    .filter((item) => item.stage !== "verified")
+    .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
+}
+
+function stageLabel(stage: LaunchManifest["stage"]) {
+  return stage.split("-").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
+}
 
 export function LaunchRecovery() {
   const [items, setItems] = useState<LaunchManifest[]>([]);
+  const [visible, setVisible] = useState(6);
 
   useEffect(() => {
     // Recovery records are browser-owned form state, not a source of onchain truth.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setItems(readManifests().filter((item) => item.stage !== "token-created").slice(0, 3));
+    const refresh = () => setItems(unfinishedManifests());
+    refresh();
+    window.addEventListener("hyped:manifest-updated", refresh);
+    return () => window.removeEventListener("hyped:manifest-updated", refresh);
   }, []);
 
   if (items.length === 0) return null;
@@ -27,14 +42,27 @@ export function LaunchRecovery() {
         <p>These entries restore form inputs only. Contract state is checked again before signing.</p>
       </div>
       <div className="recovery-list">
-        {items.map((item) => (
-          <Link href={`/launch/${item.id}`} key={item.id}>
-            <RotateCcw />
-            <span><strong>{item.input.hypedSymbol} <ChainBadge chain={item.chain} className="inline" /></strong><small>{item.analysis.symbol} reserve</small></span>
-            <span>{relativeTime(item.updatedAt)}<small>{item.stage}</small></span>
-            <ArrowRight />
-          </Link>
+        {items.slice(0, visible).map((item) => (
+          <article key={item.id}>
+            <Link href={`/launch/${item.id}`}>
+              <span className="recovery-token">
+                <span className="token-chain-logo">
+                  <Image src={tokenLogoUrl(item.input.backingToken, item.analysis.chainId)} alt="" width={34} height={34} unoptimized />
+                  <ChainBadge chain={item.chain} />
+                </span>
+                <span><strong>{item.input.hypedSymbol}</strong><small>{item.analysis.symbol} reserve</small></span>
+              </span>
+              <span className="recovery-status">{relativeTime(item.updatedAt)}<small>{stageLabel(item.stage)}</small></span>
+              <span className="recovery-continue"><RotateCcw /><ArrowRight /></span>
+            </Link>
+            <button aria-label={`Delete ${item.input.hypedSymbol} recovery entry`} onClick={() => deleteManifest(item.id)} type="button"><Trash2 /></button>
+          </article>
         ))}
+        {items.length > visible && (
+          <button className="recovery-more" onClick={() => setVisible((value) => value + 6)} type="button">
+            Show more
+          </button>
+        )}
       </div>
     </section>
   );

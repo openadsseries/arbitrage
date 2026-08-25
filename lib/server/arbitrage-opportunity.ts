@@ -1,7 +1,7 @@
 import "server-only";
 
 import { BOND_ABI, ERC20_ABI, binaryReverseMint, mintclub } from "@mint.club/v2-sdk";
-import { parseAbi, type Address } from "viem";
+import { formatUnits, parseAbi, type Address } from "viem";
 import {
   ARBITRAGE_EXECUTOR_V3_ABI,
   calculateArbitrageRoute,
@@ -11,6 +11,7 @@ import {
   type ArbitrageOpportunity,
 } from "@/lib/arbitrage";
 import { CHAINS } from "@/lib/chains";
+import { readTokenMarketPrice } from "@/lib/server/gecko-market";
 import { readVerifiedMarket } from "@/lib/server/markets";
 
 const ONCHAIN_ROUTER = "0xCa7a19BD1E260DCd92B17DdAc068C2bF67539a02" as const;
@@ -26,6 +27,36 @@ type CallResult<T> = SuccessfulCall<T> | FailedCall;
 
 function succeeded<T>(result: CallResult<T>): result is SuccessfulCall<T> {
   return result.status === "success";
+}
+
+function units(raw: bigint, decimals: number) {
+  return Number(formatUnits(raw, decimals));
+}
+
+function priceBasis(input: {
+  route: ReturnType<typeof calculateArbitrageRoute> | null;
+  hAmount: bigint;
+  hDecimals: number;
+  reserveDecimals: number;
+  reserveUsd: number | null;
+}) {
+  if (!input.route || input.hAmount <= 0n || input.reserveUsd === null) {
+    return { reserveUsd: input.reserveUsd, mintClubUsd: null, poolUsd: null, hAmountRaw: input.hAmount > 0n ? input.hAmount.toString() : null };
+  }
+  const hUnits = units(input.hAmount, input.hDecimals);
+  const amountIn = units(BigInt(input.route.amountInRaw), input.reserveDecimals);
+  const amountOut = units(BigInt(input.route.amountOutRaw), input.reserveDecimals);
+  if (!Number.isFinite(hUnits) || hUnits <= 0 || !Number.isFinite(amountIn) || !Number.isFinite(amountOut)) {
+    return { reserveUsd: input.reserveUsd, mintClubUsd: null, poolUsd: null, hAmountRaw: input.hAmount.toString() };
+  }
+  const mintClubReservePerH = input.route.direction === "Mint then sell" ? amountIn / hUnits : amountOut / hUnits;
+  const poolReservePerH = input.route.direction === "Mint then sell" ? amountOut / hUnits : amountIn / hUnits;
+  return {
+    reserveUsd: input.reserveUsd,
+    mintClubUsd: mintClubReservePerH * input.reserveUsd,
+    poolUsd: poolReservePerH * input.reserveUsd,
+    hAmountRaw: input.hAmount.toString(),
+  };
 }
 
 export async function readArbitrageOpportunity(
@@ -45,7 +76,7 @@ export async function readArbitrageOpportunity(
     throw new Error("This market does not have a separate original token route.");
   }
 
-  const [bondSteps, currentSupply, protocolFeeBps, executorRewardBps] = await Promise.all([
+  const [bondSteps, currentSupply, protocolFeeBps, executorRewardBps, reservePrice] = await Promise.all([
     client.readContract({
       address: CHAINS.base.mintClubBond,
       abi: BOND_ABI,
@@ -71,6 +102,7 @@ export async function readArbitrageOpportunity(
       functionName: "executorRewardBps",
       blockNumber: readBlock,
     }),
+    readTokenMarketPrice("base", market.reserveToken, { fresh: true }),
   ]);
 
   const curveAmounts = getArbitrageCurveAmounts(checkedAmount);
@@ -181,27 +213,33 @@ export async function readArbitrageOpportunity(
   executableMints.forEach((entry, index) => {
     const result = reserveAfterMintResults[index];
     if (!result || !succeeded(result) || result.result.amountOut <= 0n) return;
-    routesByIndex[entry.index].push(calculateArbitrageRoute({
+    routesByIndex[entry.index].push({
+      ...calculateArbitrageRoute({
       direction: "Mint then sell",
       amountIn: entry.actualReserve,
       amountOut: result.result.amountOut,
       limit: entry.reserveBudget,
       protocolFeeBps: Number(protocolFeeBps),
       executorRewardBps: Number(executorRewardBps),
-    }));
+      }),
+      hAmountRaw: entry.hAmount.toString(),
+    });
     hAmountByIndex[entry.index] = entry.hAmount;
   });
   executableBuys.forEach((entry, index) => {
     const result = redeemResults[index];
     if (!result || !succeeded(result) || result.result[0] <= 0n) return;
-    routesByIndex[entry.index].push(calculateArbitrageRoute({
+    routesByIndex[entry.index].push({
+      ...calculateArbitrageRoute({
       direction: "Buy then redeem",
       amountIn: entry.reserveBudget,
       amountOut: result.result[0],
       limit: entry.reserveBudget,
       protocolFeeBps: Number(protocolFeeBps),
       executorRewardBps: Number(executorRewardBps),
-    }));
+      }),
+      hAmountRaw: entry.hAmount.toString(),
+    });
     if (entry.hAmount > hAmountByIndex[entry.index]) hAmountByIndex[entry.index] = entry.hAmount;
   });
 
@@ -217,6 +255,9 @@ export async function readArbitrageOpportunity(
   const selectedSample = selected?.sample ?? curveSamples.at(-1);
   const selectedRoute = selected?.route ?? null;
   const best = selectedRoute?.netPositive ? selectedRoute : null;
+  const selectedHAmount = selectedRoute?.hAmountRaw
+    ? BigInt(selectedRoute.hAmountRaw)
+    : BigInt(selectedSample?.hAmountRaw ?? "0");
 
   return {
     chain: "base",
@@ -229,6 +270,13 @@ export async function readArbitrageOpportunity(
     hAmountRaw: selectedSample?.hAmountRaw ?? "0",
     protocolFeeBps: Number(protocolFeeBps),
     executorRewardBps: Number(executorRewardBps),
+    priceBasis: priceBasis({
+      route: selectedRoute,
+      hAmount: selectedHAmount,
+      hDecimals: market.decimals,
+      reserveDecimals: market.reserveDecimals,
+      reserveUsd: reservePrice?.usd ?? null,
+    }),
     bestDirection: best?.direction ?? null,
     routes: selectedSample?.routes ?? [],
     curveSamples,

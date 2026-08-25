@@ -63,6 +63,13 @@ export function readManifest(id: string) {
   return readManifests().find((manifest) => manifest.id === id) ?? null;
 }
 
+export function deleteManifest(id: string) {
+  if (typeof window === "undefined") return;
+  const next = readManifests().filter((manifest) => manifest.id !== id);
+  localStorage.setItem(MANIFEST_STORAGE_KEY, JSON.stringify(next));
+  window.dispatchEvent(new Event("hyped:manifest-updated"));
+}
+
 export function attachOwner(manifest: LaunchManifest, owner: Address) {
   return saveManifest({ ...manifest, owner });
 }

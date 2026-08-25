@@ -14,7 +14,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ snapshot: await readContinuousArbitrageSnapshot(getAddress(input.wallet)) });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Could not read continuous arbitrage." },
+      { error: error instanceof Error ? error.message : "Could not read arbitrage." },
       { status: 400 },
     );
   }
