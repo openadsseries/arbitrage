@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAddress, isAddress } from "viem";
 import { z } from "zod";
+import { compactActionError } from "@/lib/errors";
 import { buildDirectArbitrageExecution } from "@/lib/server/arbitrage-execution";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +24,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.issues[0]?.message ?? "Invalid request." }, { status: 400 });
     }
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Not executable now." },
+      { error: compactActionError(error, "Not executable now.") },
       { status: 409 },
     );
   }

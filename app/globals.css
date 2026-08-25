@@ -1127,7 +1127,7 @@ button { color: inherit; }
 .position-market small { margin-top: 3px; color: var(--muted); font-size: var(--text-meta); font-weight: 700; }
 .market-position-list strong { font-size: var(--text-meta); }
 .market-position-list strong.positive { color: var(--success); }
-.position-actions { display: flex; justify-content: flex-end; }
+.position-actions { display: flex; justify-content: flex-start; }
 .position-actions > svg { width: 15px; color: var(--muted); }
 .market-position-list button { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 11px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: white; font: inherit; font-size: var(--text-meta); font-weight: 800; cursor: pointer; }
 .market-position-list button svg { width: 13px; }

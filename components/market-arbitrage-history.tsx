@@ -15,18 +15,12 @@ import {
   type ReserveArbitrageExecution,
 } from "@/lib/arbitrage";
 import { CHAINS } from "@/lib/chains";
+import { compactActionError as compactError } from "@/lib/errors";
 import type { VerifiedMarket } from "@/lib/onchain-types";
 
 function tokenAmount(raw: string, decimals: number) {
   const value = Number(formatUnits(BigInt(raw), decimals));
   return value.toLocaleString("en-US", { maximumFractionDigits: 8 });
-}
-
-function compactError(reason: unknown, fallback: string) {
-  const message = reason instanceof Error ? reason.message : String(reason || fallback);
-  if (/over rate limit|rate.?limit|too many requests|429/i.test(message)) return "Base RPC is busy. Wait a moment and try again.";
-  if (/rpc request failed|http request failed|failed to fetch|network request/i.test(message)) return "The Base read was interrupted. Try again.";
-  return message;
 }
 
 function isLive(strategy: ContinuousArbitrageStrategy, snapshot: ContinuousArbitrageSnapshot) {

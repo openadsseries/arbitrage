@@ -17,6 +17,7 @@ import {
   type ReserveArbitrageSnapshot,
 } from "@/lib/arbitrage";
 import { CHAINS } from "@/lib/chains";
+import { compactActionError as actionError } from "@/lib/errors";
 import { compact, shortAddress } from "@/lib/format";
 import type { VerifiedMarket } from "@/lib/onchain-types";
 
@@ -34,13 +35,6 @@ function wethAmount(raw: string) {
 
 function marketFor(markets: VerifiedMarket[], hToken: Address) {
   return markets.find((market) => market.chain === "base" && market.token.toLowerCase() === hToken.toLowerCase());
-}
-
-function actionError(reason: unknown, fallback: string) {
-  const message = reason instanceof Error ? reason.message : String(reason || fallback);
-  if (/over rate limit|rate.?limit|too many requests|429/i.test(message)) return "Base RPC is busy. Wait a moment and try again.";
-  if (/rpc request failed|http request failed|failed to fetch|network request/i.test(message)) return "The Base read was interrupted. Try again.";
-  return message;
 }
 
 export function ArbitragePortfolio({ wallet, markets }: { wallet: Address; markets: VerifiedMarket[] }) {

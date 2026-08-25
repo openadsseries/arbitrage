@@ -13,6 +13,7 @@ import {
   type ContinuousArbitrageSnapshot,
   type ReserveArbitrageExecution,
 } from "@/lib/arbitrage";
+import { compactActionError as errorMessage } from "@/lib/errors";
 import { shortAddress } from "@/lib/format";
 import type { VerifiedMarket } from "@/lib/onchain-types";
 import { sendAtomicCallsIfSupported } from "@/lib/wallet-calls";
@@ -42,24 +43,6 @@ type DirectExecution = {
 
 function reserveAmount(raw: string, decimals: number) {
   return Number(formatUnits(BigInt(raw), decimals)).toLocaleString("en-US", { maximumFractionDigits: 8 });
-}
-
-function errorMessage(reason: unknown, fallback: string) {
-  const simplify = (message: string) => {
-    if (/user denied|user rejected|request signature/i.test(message)) return "Wallet approval was cancelled.";
-    if (/over rate limit|rate.?limit|too many requests|429/i.test(message)) return "Base RPC is busy. Wait a moment and try again.";
-    if (/rpc request failed/i.test(message)) return "The Base read was interrupted. Try again.";
-    if (/http request failed|failed to fetch|network request/i.test(message)) return "The Base read was interrupted. Try again.";
-    return message;
-  };
-  if (reason instanceof Error) return simplify(reason.message);
-  if (typeof reason === "object" && reason) {
-    const value = reason as { message?: unknown; shortMessage?: unknown; details?: unknown };
-    for (const candidate of [value.shortMessage, value.message, value.details]) {
-      if (typeof candidate === "string" && candidate.trim()) return simplify(candidate);
-    }
-  }
-  return fallback;
 }
 
 export function MarketAutomationPanel({
