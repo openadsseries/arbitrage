@@ -45,6 +45,19 @@ function reserveAmount(raw: string, decimals: number) {
   return Number(formatUnits(BigInt(raw), decimals)).toLocaleString("en-US", { maximumFractionDigits: 8 });
 }
 
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function hasLiveMarketStrategy(snapshot: ContinuousArbitrageSnapshot, token: Address) {
+  return snapshot.strategies.some((strategy) =>
+    strategy.hToken.toLowerCase() === token.toLowerCase()
+      && strategy.active
+      && BigInt(strategy.remainingVolumeRaw) > 0n
+      && (strategy.validUntil === 0 || strategy.validUntil > snapshot.readTimestamp)
+  );
+}
+
 export function MarketAutomationPanel({
   market,
   initialReadiness,
@@ -140,7 +153,17 @@ export function MarketAutomationPanel({
     } else {
       setReserveAllowanceRaw(0n);
     }
+    return nextSnapshot;
   }, [readSnapshot, wallet]);
+
+  const refreshSettledWalletState = useCallback(async (address: Address, nextPreparation: Preparation | null) => {
+    let latest = await refreshWalletState(address, nextPreparation);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await wait(900);
+      latest = await refreshWalletState(address, nextPreparation);
+    }
+    return latest;
+  }, [refreshWalletState]);
 
   useEffect(() => {
     if (!wallet.address) return;
@@ -238,25 +261,6 @@ export function MarketAutomationPanel({
     if (receipt.status !== "success") throw new Error("Execution failed.");
   }
 
-  async function executeRunning() {
-    if (!wallet.address || !activeSnapshot?.executor || !running) return;
-    setBusy(true);
-    setError("");
-    setMessage("");
-    try {
-      await executeStrategyNow(wallet.address, BigInt(running.id), activeSnapshot.executor);
-      setMessage("Executed.");
-      await refreshWalletState(wallet.address, preparation);
-      onPositionChange?.();
-    } catch (reason) {
-      setError(errorMessage(reason, "Not executable now."));
-      setMessage("Watching.");
-    } finally {
-      setBusy(false);
-      setProgress("");
-    }
-  }
-
   async function execute() {
     if (!preparation || budgetRaw === null || totalLimitRaw === null || budgetError) return;
     setBusy(true);
@@ -336,14 +340,17 @@ export function MarketAutomationPanel({
         blockTag: "pending",
       });
       if (strategyId === 0n) throw new Error("Position not found.");
+      let executed = false;
       try {
         await executeStrategyNow(address, strategyId, currentSnapshot.executor);
-        setMessage("Executed.");
+        executed = true;
       } catch (reason) {
         setError(errorMessage(reason, "Not executable now."));
-        setMessage("Watching.");
       }
-      await refreshWalletState(address, preparation);
+      const nextSnapshot = await refreshSettledWalletState(address, preparation);
+      setMessage(executed
+        ? hasLiveMarketStrategy(nextSnapshot, market.token) ? "Executed. Watching remainder." : "Executed."
+        : "Watching.");
       onPositionChange?.();
     } catch (reason) {
       if (approvalMayRemain) setShowRevoke(true);
@@ -446,7 +453,7 @@ export function MarketAutomationPanel({
 
   return <section className="market-auto-panel">
     {running ? <>
-      <div className="market-auto-status"><span><i /> Watching</span><small>Ready to execute</small></div>
+      <div className="market-auto-status"><span><i /> Watching</span><small>Automatic</small></div>
       <h2>Waiting for price.</h2>
       <dl className="market-auto-summary">
         <div><dt>Total profit</dt><dd className="positive">+{reserveAmount(totalProfitRaw.toString(), market.reserveDecimals)} {market.reserveSymbol}</dd></div>
@@ -454,7 +461,6 @@ export function MarketAutomationPanel({
         <div><dt>Amount left</dt><dd>{reserveAmount(running.remainingVolumeRaw, market.reserveDecimals)} {market.reserveSymbol}</dd></div>
       </dl>
       <div className="market-auto-actions">
-        <button className="button-primary automation-action" disabled={busy} onClick={() => void executeRunning()} type="button">{busy ? <LoaderCircle className="spin" /> : <Play />} {busy ? progress : "Execute now"}</button>
         <button className="market-auto-stop" disabled={busy} onClick={() => void stopAndRevoke()} type="button">{busy ? <LoaderCircle className="spin" /> : <Pause />} Stop</button>
       </div>
     </> : <>
