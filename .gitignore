@@ -1,0 +1,11 @@
+.env*
+!.env.example
+.next/
+node_modules/
+*.tsbuildinfo
+.DS_Store
+.featuremap/
+coverage/
+contracts/cache/
+contracts/out/
+contracts/broadcast/
