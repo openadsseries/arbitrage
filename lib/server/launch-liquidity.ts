@@ -1,15 +1,6 @@
 import "server-only";
 
 import { mintclub } from "@mint.club/v2-sdk";
-import { Percent, Token } from "@uniswap/sdk-core";
-import {
-  encodeSqrtRatioX96,
-  nearestUsableTick,
-  NonfungiblePositionManager,
-  Pool,
-  Position,
-  TickMath,
-} from "@uniswap/v3-sdk";
 import {
   getAddress,
   isAddressEqual,
@@ -21,6 +12,7 @@ import { CHAINS, type ChainKey } from "@/lib/chains";
 import { discoverDirectUniswapMarket } from "@/lib/server/uniswap-market";
 import type { LiquidityPreparation } from "@/lib/types";
 import type { ArbitragePreview } from "@/lib/types";
+import { prepareFullRangeUniswapV3Position } from "@/lib/uniswap-v3-position";
 
 const FACTORY_ABI = parseAbi([
   "function getPool(address tokenA, address tokenB, uint24 fee) view returns (address pool)",
@@ -326,72 +318,18 @@ export async function prepareLaunchLiquidity({
     );
   }
 
-  const hSdkToken = new Token(
-    capability.id,
-    hypedToken,
-    hypedDecimals,
-    hypedSymbol,
-  );
-  const quoteSdkToken = new Token(
-    capability.id,
-    directQuote.quoteToken,
-    directQuote.quoteDecimals,
-    directQuote.quoteSymbol,
-  );
-  const token0 = hSdkToken.sortsBefore(quoteSdkToken)
-    ? hSdkToken
-    : quoteSdkToken;
-  const token1 = hSdkToken.sortsBefore(quoteSdkToken)
-    ? quoteSdkToken
-    : hSdkToken;
-  const amount0 = token0.equals(hSdkToken)
-    ? hypedAmount
-    : directQuote.amountOut;
-  const amount1 = token1.equals(hSdkToken)
-    ? hypedAmount
-    : directQuote.amountOut;
-  const sqrtPriceX96 = encodeSqrtRatioX96(
-    amount1.toString(),
-    amount0.toString(),
-  );
-  const currentTick = TickMath.getTickAtSqrtRatio(sqrtPriceX96);
-  const poolModel = new Pool(
-    token0,
-    token1,
-    NEW_POOL_FEE,
-    sqrtPriceX96.toString(),
-    "0",
-    currentTick,
-  );
-  const position = Position.fromAmounts({
-    pool: poolModel,
-    tickLower: nearestUsableTick(TickMath.MIN_TICK, poolModel.tickSpacing),
-    tickUpper: nearestUsableTick(TickMath.MAX_TICK, poolModel.tickSpacing),
-    amount0: amount0.toString(),
-    amount1: amount1.toString(),
-    useFullPrecision: true,
-  });
   const deadline = Math.floor(Date.now() / 1000) + DEADLINE_SECONDS;
-  const method = NonfungiblePositionManager.addCallParameters(position, {
+  const position = prepareFullRangeUniswapV3Position({
+    factory: capability.uniswapV3Factory,
+    tokenA: hypedToken,
+    amountA: hypedAmount,
+    tokenB: directQuote.quoteToken,
+    amountB: directQuote.amountOut,
+    fee: NEW_POOL_FEE,
     recipient: owner,
     deadline,
-    slippageTolerance: new Percent(POSITION_SLIPPAGE_BPS, 10_000),
-    createPool: true,
+    slippageBps: POSITION_SLIPPAGE_BPS,
   });
-  const mintAmounts = position.mintAmounts;
-  const positionAmountHyped = token0.equals(hSdkToken)
-    ? BigInt(mintAmounts.amount0.toString())
-    : BigInt(mintAmounts.amount1.toString());
-  const positionAmountQuote = token0.equals(quoteSdkToken)
-    ? BigInt(mintAmounts.amount0.toString())
-    : BigInt(mintAmounts.amount1.toString());
-  const pool = Pool.getAddress(
-    token0,
-    token1,
-    NEW_POOL_FEE,
-    undefined,
-    capability.uniswapV3Factory,
-  );
 
   return {
     chain,
@@ -413,13 +351,13 @@ export async function prepareLaunchLiquidity({
     quoteAmountRaw: directQuote.amountOut.toString(),
     sourcePool: directQuote.pool,
     sourcePoolFee: directQuote.fee,
-    pool: getAddress(pool),
+    pool: getAddress(position.pool),
     poolFee: NEW_POOL_FEE,
     positionManager: capability.nonfungiblePositionManager,
-    positionAmountHypedRaw: positionAmountHyped.toString(),
-    positionAmountQuoteRaw: positionAmountQuote.toString(),
-    calldata: method.calldata as `0x${string}`,
-    valueRaw: method.value,
+    positionAmountHypedRaw: hypedAmount.toString(),
+    positionAmountQuoteRaw: directQuote.amountOut.toString(),
+    calldata: position.calldata,
+    valueRaw: position.value.toString(),
   };
 }
 

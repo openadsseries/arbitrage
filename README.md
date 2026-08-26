@@ -238,7 +238,7 @@ forge fmt --check
 forge test
 ```
 
-The current release passes 25 application tests and 36 contract tests, plus Base fork coverage for the existing execution paths.
+The current release passes 28 application tests and 36 contract tests, plus Base fork coverage for the existing execution paths.
 
 ## Repository map
 
