@@ -230,7 +230,6 @@ export function ArbitragePortfolio({
                           ? `${market.reserveSymbol} ↔ ${market.symbol}`
                           : shortAddress(strategy.hToken)}
                       </strong>
-                      <small>#{strategy.id}</small>
                     </span>
                   </div>
                   <strong>

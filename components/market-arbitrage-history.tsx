@@ -190,7 +190,6 @@ export function MarketArbitrageHistory({
               />
               <span>
                 <strong>Automation</strong>
-                <small>#{activeStrategy.id}</small>
               </span>
             </div>
             <strong>
