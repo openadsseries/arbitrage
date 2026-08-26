@@ -8,8 +8,15 @@ import { ArrowRight, LoaderCircle, Search } from "lucide-react";
 import { formatUnits, isAddress } from "viem";
 import { ChainBadge } from "@/components/chain-badge";
 import { tokenLogoUrl } from "@/components/token-logo";
-import type { ArbitrageOpportunity, ArbitrageOpportunityRoute } from "@/lib/arbitrage";
+import { useWallet } from "@/components/wallet-provider";
+import type {
+  ArbitrageOpportunity,
+  ArbitrageOpportunityRoute,
+  ContinuousArbitrageStrategy,
+  DirectArbitrageExecutionQuote,
+} from "@/lib/arbitrage";
 import { CHAINS, type ChainKey } from "@/lib/chains";
+import { useContinuousArbitrageSnapshot } from "@/lib/continuous-arbitrage-client";
 import { compact, usd } from "@/lib/format";
 import { readManifests } from "@/lib/manifest";
 import type { VerifiedMarket } from "@/lib/onchain-types";
@@ -17,6 +24,16 @@ import type { VerifiedMarket } from "@/lib/onchain-types";
 type ArbitragePreviewState =
   | { status: "checking" }
   | { status: "ready"; bps: number; route: ArbitrageOpportunityRoute["direction"] | null; positive: boolean }
+  | { status: "unavailable" };
+
+type ActiveArbitrageState =
+  | { status: "checking" }
+  | { status: "ready"; execution: DirectArbitrageExecutionQuote }
+  | { status: "waiting-gas" }
+  | { status: "watching" }
+  | { status: "relay-gas" }
+  | { status: "setup-needed" }
+  | { status: "paused" }
   | { status: "unavailable" };
 
 function amount(raw: string, decimals: number) {
@@ -53,10 +70,51 @@ function previewLabel(preview: ArbitragePreviewState | undefined) {
 }
 
 function previewHint(preview: ArbitragePreviewState | undefined) {
-  if (!preview || preview.status === "checking") return "Live quote";
+  if (!preview || preview.status === "checking") return "Before gas";
   if (preview.status === "unavailable") return "Not ready";
   if (!preview.positive) return "No gap";
-  return preview.route === "Mint then sell" ? "Mint, sell pool" : "Buy, redeem";
+  return "Before gas";
+}
+
+function activeLabel(state: ActiveArbitrageState | undefined) {
+  if (!state || state.status === "checking") return "Checking";
+  if (state.status === "ready") return "Ready";
+  if (state.status === "waiting-gas") return "Gas too high";
+  if (state.status === "watching") return "Watching";
+  if (state.status === "relay-gas") return "Relay needs gas";
+  if (state.status === "setup-needed") return "Setup needed";
+  if (state.status === "paused") return "Paused today";
+  return "Status unavailable";
+}
+
+function activeHint(state: ActiveArbitrageState | undefined) {
+  if (!state || state.status === "checking") return "Checking execution";
+  if (state.status === "ready") {
+    const amount = BigInt(state.execution.amountInReserveRaw);
+    const profit = BigInt(state.execution.expectedOwnerProfitRaw);
+    const bps = amount > 0n ? Number(profit * 10_000n / amount) : 0;
+    return `+${(bps / 100).toFixed(2)}% after costs`;
+  }
+  if (state.status === "waiting-gas") return "Waiting for gas";
+  if (state.status === "watching") return "No executable route";
+  if (state.status === "relay-gas") return "Automatic execution paused";
+  if (state.status === "setup-needed") return "Automatic execution unavailable";
+  if (state.status === "paused") return "Daily limit reached";
+  return "Try again soon";
+}
+
+function liveStrategy(
+  strategies: ContinuousArbitrageStrategy[],
+  token: string,
+  readTimestamp: number,
+) {
+  return strategies.find(
+    (strategy) =>
+      strategy.hToken.toLowerCase() === token.toLowerCase() &&
+      strategy.active &&
+      BigInt(strategy.remainingVolumeRaw) > 0n &&
+      (strategy.validUntil === 0 || strategy.validUntil > readTimestamp),
+  );
 }
 
 export function MarketsBrowser({
@@ -69,6 +127,8 @@ export function MarketsBrowser({
   initialError?: string;
 }) {
   const router = useRouter();
+  const wallet = useWallet();
+  const automationSnapshot = useContinuousArbitrageSnapshot(wallet.address);
   const [query, setQuery] = useState("");
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState("");
@@ -79,6 +139,7 @@ export function MarketsBrowser({
   const [addressMatches, setAddressMatches] = useState<VerifiedMarket[]>([]);
   const [walletLaunched, setWalletLaunched] = useState<VerifiedMarket[]>([]);
   const [arbitragePreviews, setArbitragePreviews] = useState<Record<string, ArbitragePreviewState>>({});
+  const [activeArbitrage, setActiveArbitrage] = useState<Record<string, ActiveArbitrageState>>({});
   const launchedRequests = useRef(new Set<string>());
 
   useEffect(() => {
@@ -148,6 +209,90 @@ export function MarketsBrowser({
     return search.includes(query.trim().toLowerCase());
   }), [allMarkets, query]);
   const marketKeys = useMemo(() => markets.map((market) => `${market.chain}-${market.token.toLowerCase()}`).join("|"), [markets]);
+  const activeStrategies = useMemo(() => {
+    const snapshot = automationSnapshot.snapshot;
+    if (!snapshot) return new Map<string, ContinuousArbitrageStrategy>();
+    const next = new Map<string, ContinuousArbitrageStrategy>();
+    for (const market of markets) {
+      const strategy = liveStrategy(
+        snapshot.strategies,
+        market.token,
+        snapshot.readTimestamp,
+      );
+      if (strategy) next.set(`${market.chain}-${market.token.toLowerCase()}`, strategy);
+    }
+    return next;
+  }, [automationSnapshot.snapshot, markets]);
+  const activeStrategyKeys = useMemo(
+    () => [...activeStrategies.entries()].map(([key, strategy]) => `${key}:${strategy.id}`).join("|"),
+    [activeStrategies],
+  );
+
+  useEffect(() => {
+    if (!wallet.address || activeStrategies.size === 0) return;
+    let active = true;
+    const controller = new AbortController();
+    const check = async (key: string, strategy: ContinuousArbitrageStrategy) => {
+      setActiveArbitrage((current) => ({
+        ...current,
+        [key]: { status: "checking" },
+      }));
+      try {
+        const params = new URLSearchParams({
+          owner: wallet.address!,
+          strategyId: strategy.id,
+        });
+        const response = await fetch(`/api/arbitrage/relay?${params}`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const payload = (await response.json()) as {
+          ready?: boolean;
+          state?: string;
+          strategy?: {
+            status: "ready" | "waiting-gas" | "none";
+            execution: DirectArbitrageExecutionQuote | null;
+          };
+        };
+        if (!response.ok) {
+          throw new Error("Status unavailable.");
+        }
+        if (payload.ready === false) {
+          const next: ActiveArbitrageState =
+            payload.state === "low-balance"
+              ? { status: "relay-gas" }
+              : payload.state === "paused"
+                ? { status: "paused" }
+                : { status: "setup-needed" };
+          if (active) {
+            setActiveArbitrage((current) => ({ ...current, [key]: next }));
+          }
+          return;
+        }
+        if (!payload.strategy) throw new Error("Status unavailable.");
+        const next: ActiveArbitrageState =
+          payload.strategy.status === "ready" && payload.strategy.execution
+            ? { status: "ready", execution: payload.strategy.execution }
+            : payload.strategy.status === "waiting-gas"
+              ? { status: "waiting-gas" }
+              : { status: "watching" };
+        if (active) {
+          setActiveArbitrage((current) => ({ ...current, [key]: next }));
+        }
+      } catch (reason) {
+        if (!active || (reason instanceof DOMException && reason.name === "AbortError")) return;
+        setActiveArbitrage((current) => ({
+          ...current,
+          [key]: { status: "unavailable" },
+        }));
+      }
+    };
+    void Promise.all([...activeStrategies.entries()].map(([key, strategy]) => check(key, strategy)));
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [activeStrategies, activeStrategyKeys, wallet.address]);
 
   useEffect(() => {
     let active = true;
@@ -244,7 +389,7 @@ export function MarketsBrowser({
       {remoteUnavailableChains.length > 0 && <p className="partial-note">Some networks are temporarily unavailable. Available markets remain live.</p>}
       {loadingMarkets && markets.length === 0 ? (
         <div className="market-table onchain-market-table loading">
-          <div className="table-head"><span>Market</span><span>Price</span><span>Market cap</span><span>Backing</span><span>Arbitrage</span><span>Action</span></div>
+          <div className="table-head"><span>Market</span><span>Price</span><span>Market cap</span><span>Backing</span><span>Opportunity</span><span>Action</span></div>
           {[0, 1, 2, 3].map((item) => <div className="market-row skeleton-row" key={item}><span /><span /><span /><span /><span /><span /></div>)}
         </div>
       ) : markets.length === 0 ? (
@@ -254,9 +399,12 @@ export function MarketsBrowser({
         </div>
       ) : (
         <div className="market-table onchain-market-table">
-          <div className="table-head"><span>Market</span><span>Price</span><span>Market cap</span><span>Backing</span><span>Arbitrage</span><span>Action</span></div>
+          <div className="table-head"><span>Market</span><span>Price</span><span>Market cap</span><span>Backing</span><span>Opportunity</span><span>Action</span></div>
           {markets.map((market) => {
-            const preview = arbitragePreviews[`${market.chain}-${market.token.toLowerCase()}`];
+            const key = `${market.chain}-${market.token.toLowerCase()}`;
+            const preview = arbitragePreviews[key];
+            const strategy = activeStrategies.get(key);
+            const activeState = strategy ? activeArbitrage[key] : undefined;
             const href = `/market/${market.chain}/${market.token}`;
             const prefetch = () => router.prefetch(href);
             return (
@@ -271,9 +419,9 @@ export function MarketsBrowser({
               </span>
               <strong className="market-number" data-label="Market cap" title="Current supply multiplied by the current buy price">{market.impliedMarketCapUsd === null ? `${amount(market.impliedMarketCapReserveRaw, market.reserveDecimals)} ${market.reserveSymbol}` : marketCapUsd(market.impliedMarketCapUsd)}</strong>
               <strong className="market-number" data-label="Backing">{amount(market.reserveBalanceRaw, market.reserveDecimals)} {market.reserveSymbol}</strong>
-              <span className={`market-number market-arbitrage-preview ${preview?.status === "ready" && preview.positive ? "positive" : ""}`} data-label="Arbitrage">
-                <strong>{previewLabel(preview)}</strong>
-                <small>{previewHint(preview)}</small>
+              <span className={`market-number market-arbitrage-preview ${strategy ? `state-${activeState?.status ?? "checking"}` : preview?.status === "ready" && preview.positive ? "positive" : ""}`} data-label="Opportunity">
+                <strong>{strategy ? activeLabel(activeState) : previewLabel(preview)}</strong>
+                <small>{strategy ? activeHint(activeState) : previewHint(preview)}</small>
               </span>
               <Link className="market-buy" href={href} onFocus={prefetch} onMouseEnter={prefetch}>Arbitrage</Link>
             </div>

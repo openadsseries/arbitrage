@@ -576,7 +576,7 @@ export function ArbitragePriceGap({
     )
       return "No profit right now";
     if (netPositive && route)
-      return `+${((route.netReturnBps ?? route.gapBps) / 100).toFixed(2)}% profit opportunity`;
+      return `+${((route.netReturnBps ?? route.gapBps) / 100).toFixed(2)}% ${active ? "profit opportunity" : "price gap"}`;
     if (active && !activeQuote) return "Checking prices";
     if (!active && loading) return "Checking prices";
     if (quotedAmountRaw === null) return "Enter an amount";

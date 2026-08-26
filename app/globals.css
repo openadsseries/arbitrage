@@ -588,6 +588,8 @@ button { color: inherit; }
 .market-number::before { display: none; }
 .market-arbitrage-preview strong { color: var(--muted-strong); }
 .market-arbitrage-preview.positive strong { color: var(--success); }
+.market-arbitrage-preview.state-ready strong { color: var(--success); }
+.market-arbitrage-preview.state-waiting-gas strong { color: var(--warning); }
 .market-buy { width: 100%; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; padding: 0 12px; border: 0; border-radius: 7px; color: white; background: var(--accent); font-size: var(--text-ui); font-weight: 800; line-height: 1; white-space: nowrap; cursor: pointer; }
 .market-buy:hover { background: var(--accent-hover); }
 .venue-status { display: inline-flex; width: fit-content; padding: 5px 7px; border-radius: 5px; font-size: var(--text-meta); font-weight: 800; }

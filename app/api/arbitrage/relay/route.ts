@@ -26,6 +26,12 @@ const requestSchema = z.object({
   owner: z.string().refine(isAddress, "Connect wallet."),
   strategyId: z.string().regex(/^\d+$/, "Invalid position."),
 });
+const statusRequestSchema = requestSchema.partial().refine(
+  (value) =>
+    (value.owner === undefined && value.strategyId === undefined) ||
+    (value.owner !== undefined && value.strategyId !== undefined),
+  "Invalid position.",
+);
 const EXPECTED_EXECUTOR = "0xbB7AF71818fD1a269f21D0b5E4d8F7CF5401Ac3C";
 const EXPECTED_DEPLOYMENT_BLOCK = "50422622";
 const EXPECTED_ROUTER = "0xCa7a19BD1E260DCd92B17DdAc068C2bF67539a02";
@@ -179,7 +185,12 @@ export async function GET(request: Request) {
   });
   if (limited) return limited;
   try {
-    const { balance } = await relayContext();
+    const url = new URL(request.url);
+    const input = statusRequestSchema.parse({
+      owner: url.searchParams.get("owner") ?? undefined,
+      strategyId: url.searchParams.get("strategyId") ?? undefined,
+    });
+    const { account, balance, publicClient } = await relayContext();
     const requiredBalance = minimumRelayBalance();
     if (balance < requiredBalance) {
       return NextResponse.json({
@@ -200,14 +211,39 @@ export async function GET(request: Request) {
         requiredBalanceRaw: requiredBalance.toString(),
       });
     }
-    return NextResponse.json({
+    const relayStatus = {
       ready: true,
       state: "ready",
       message: "Automatic execution is ready.",
       balanceRaw: balance.toString(),
       requiredBalanceRaw: requiredBalance.toString(),
+    } as const;
+    if (!input.owner || !input.strategyId) {
+      return NextResponse.json(relayStatus);
+    }
+    const strategy = await readDirectArbitrageExecutionStatus({
+      owner: getAddress(input.owner),
+      strategyId: BigInt(input.strategyId),
+      executionAccount: account.address,
+      client: publicClient as unknown as Parameters<
+        typeof readDirectArbitrageExecutionStatus
+      >[0]["client"],
+    });
+    return NextResponse.json({
+      ...relayStatus,
+      strategy: {
+        status: strategy.status,
+        execution: "execution" in strategy ? strategy.execution : null,
+        error: "error" in strategy ? strategy.error : null,
+      },
     });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: error.issues[0]?.message ?? "Invalid position." },
+        { status: 400 },
+      );
+    }
     let requiredBalanceRaw = "100000000000000";
     try {
       requiredBalanceRaw = minimumRelayBalance().toString();
