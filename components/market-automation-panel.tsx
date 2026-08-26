@@ -750,11 +750,11 @@ export function MarketAutomationPanel({
               </dd>
             </div>
             <div>
-              <dt>Runs</dt>
+              <dt>Executions</dt>
               <dd>{running.executionCount}</dd>
             </div>
             <div>
-              <dt>Left</dt>
+              <dt>Budget left</dt>
               <dd>
                 {reserveAmount(
                   running.remainingVolumeRaw,

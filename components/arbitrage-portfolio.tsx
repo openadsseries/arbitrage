@@ -188,7 +188,7 @@ export function ArbitragePortfolio({
           <strong>{activeStrategies.length}</strong>
         </div>
         <div>
-          <span>Runs</span>
+          <span>Executions</span>
           <strong>{continuous.executions.length}</strong>
         </div>
       </section>
@@ -198,15 +198,15 @@ export function ArbitragePortfolio({
           <h2>Active</h2>
           <span>
             {activeStrategies.length} watching · {continuous.executions.length}{" "}
-            runs
+            executions
           </span>
         </div>
         {activeStrategies.length ? (
           <div className="automation-list">
             <div className="automation-table-head" aria-hidden="true">
               <span>Market</span>
-              <span>Each run</span>
-              <span>Left</span>
+              <span>Per run</span>
+              <span>Budget left</span>
               <span>Status</span>
               <span>Action</span>
             </div>
@@ -289,7 +289,7 @@ export function ArbitragePortfolio({
           <div className="automation-history">
             <div className="automation-table-head" aria-hidden="true">
               <span>Market</span>
-              <span>PnL</span>
+              <span>Profit</span>
               <span>Used</span>
               <span>Block</span>
               <span>Action</span>

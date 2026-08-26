@@ -168,12 +168,12 @@ export function MarketArbitrageHistory({
 
       <div className="market-position-list">
         <div className="market-position-columns" aria-hidden="true">
-          <span>Type</span>
-          <span>Each run</span>
-          <span>Left</span>
-          <span>Return</span>
-          <span>PnL</span>
-          <span>Runs</span>
+          <span>Activity</span>
+          <span>Per run</span>
+          <span>Budget left</span>
+          <span>Returned</span>
+          <span>Profit</span>
+          <span>Executions</span>
           <span>Status</span>
           <span>Action</span>
         </div>
@@ -189,7 +189,7 @@ export function MarketArbitrageHistory({
                 unoptimized
               />
               <span>
-                <strong>Active</strong>
+                <strong>Automation</strong>
                 <small>#{activeStrategy.id}</small>
               </span>
             </div>
@@ -255,7 +255,7 @@ export function MarketArbitrageHistory({
                 unoptimized
               />
               <span>
-                <strong>Run</strong>
+                <strong>Execution</strong>
                 <small>{execution.direction}</small>
               </span>
             </div>
