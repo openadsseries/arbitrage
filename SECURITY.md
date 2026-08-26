@@ -20,8 +20,9 @@ Do not include live private keys, seed phrases or unrestricted API credentials.
 - `ARBITRAGE_RELAYER_PRIVATE_KEY` belongs only in the web deployment and must use a dedicated low-balance gas account.
 - `ARBITRAGE_KEEPER_PRIVATE_KEY` belongs only on the persistent keeper host.
 - Never reuse the relay and keeper keys.
-- Keep `ARBITRAGE_RELAY_DAILY_GAS_WEI` low enough to bound one deployment instance's daily gas use.
-- Use dedicated accounts funded only for gas.
+- `ARBITRAGE_RELAY_DAILY_GAS_WEI` is a per-instance guard, not a globally durable counter on serverless hosts.
+- Keep `ARBITRAGE_RELAY_MIN_BALANCE_WEI` high enough for several Base executions; the app blocks new positions below it.
+- Use a dedicated account funded only for gas; its balance is the global hard spending cap.
 - Uniswap and RPC credentials remain server-side.
 - Rotate any credential immediately if it appears in logs, screenshots, commits or support messages.
 

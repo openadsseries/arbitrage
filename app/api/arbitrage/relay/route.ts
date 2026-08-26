@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   createPublicClient,
   createWalletClient,
+  fallback,
   getAddress,
   http,
   isAddress,
@@ -10,6 +11,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { base } from "viem/chains";
 import { z } from "zod";
 import { ARBITRAGE_EXECUTOR_V3_ABI } from "@/lib/arbitrage";
+import { CHAINS } from "@/lib/chains";
 import { compactActionError } from "@/lib/errors";
 import { readDirectArbitrageExecutionStatus } from "@/lib/server/arbitrage-execution";
 import {
@@ -24,6 +26,9 @@ const requestSchema = z.object({
   owner: z.string().refine(isAddress, "Connect wallet."),
   strategyId: z.string().regex(/^\d+$/, "Invalid position."),
 });
+const EXPECTED_EXECUTOR = "0xbB7AF71818fD1a269f21D0b5E4d8F7CF5401Ac3C";
+const EXPECTED_DEPLOYMENT_BLOCK = "50422622";
+const EXPECTED_ROUTER = "0xCa7a19BD1E260DCd92B17DdAc068C2bF67539a02";
 
 function relayPrivateKey() {
   const privateKey = process.env.ARBITRAGE_RELAYER_PRIVATE_KEY;
@@ -46,17 +51,16 @@ function dailyGasLimit() {
   return BigInt(configured);
 }
 
+function minimumRelayBalance() {
+  const configured = process.env.ARBITRAGE_RELAY_MIN_BALANCE_WEI?.trim();
+  if (!configured) return 100_000_000_000_000n;
+  if (!/^\d+$/.test(configured))
+    throw new Error("Relay minimum balance invalid.");
+  return BigInt(configured);
+}
+
 function reserveRelayGas(amount: bigint) {
-  const day = new Date().toISOString().slice(0, 10);
-  const budget = relayBudgetStore.__gethypedRelayGasBudget;
-  if (!budget || budget.day !== day) {
-    relayBudgetStore.__gethypedRelayGasBudget = {
-      day,
-      spent: 0n,
-      reserved: 0n,
-    };
-  }
-  const current = relayBudgetStore.__gethypedRelayGasBudget!;
+  const current = currentRelayGasBudget();
   if (current.spent + current.reserved + amount > dailyGasLimit()) {
     throw new Error("Relay paused for today.");
   }
@@ -70,10 +74,154 @@ function reserveRelayGas(amount: bigint) {
   };
 }
 
+function currentRelayGasBudget() {
+  const day = new Date().toISOString().slice(0, 10);
+  const budget = relayBudgetStore.__gethypedRelayGasBudget;
+  if (!budget || budget.day !== day) {
+    relayBudgetStore.__gethypedRelayGasBudget = {
+      day,
+      spent: 0n,
+      reserved: 0n,
+    };
+  }
+  const current = relayBudgetStore.__gethypedRelayGasBudget!;
+  return current;
+}
+
 function rpcUrl() {
   const url = process.env.BASE_RPC_URL;
   if (!url) throw new Error("Relay not configured.");
   return url;
+}
+
+async function relayContext() {
+  const account = privateKeyToAccount(relayPrivateKey());
+  const primaryRpc = rpcUrl();
+  const rpcEndpoints = [primaryRpc, "https://mainnet.base.org"].filter(
+    (url, index, endpoints) => endpoints.indexOf(url) === index,
+  );
+  const transport = fallback(
+    rpcEndpoints.map((url) => http(url, { retryCount: 0, timeout: 8_000 })),
+    { rank: false, retryCount: 0 },
+  );
+  const publicClient = createPublicClient({ chain: base, transport });
+  const executorValue = process.env.NEXT_PUBLIC_ARBITRAGE_EXECUTOR_V3;
+  if (!executorValue || !isAddress(executorValue)) {
+    throw new Error("Arbitrage contract not configured.");
+  }
+  const executor = getAddress(executorValue);
+  if (executor !== getAddress(EXPECTED_EXECUTOR)) {
+    throw new Error("Arbitrage contract address changed.");
+  }
+  if (
+    process.env.ARBITRAGE_EXECUTOR_V3_DEPLOYMENT_BLOCK?.trim() !==
+    EXPECTED_DEPLOYMENT_BLOCK
+  ) {
+    throw new Error("Arbitrage deployment block changed.");
+  }
+  const [
+    chainId,
+    balance,
+    code,
+    protocolFeeBps,
+    executorRewardBps,
+    weth,
+    mintClubBond,
+    onchainRouter,
+  ] = await Promise.all([
+    publicClient.getChainId(),
+    publicClient.getBalance({ address: account.address }),
+    publicClient.getCode({ address: executor }),
+    publicClient.readContract({
+      address: executor,
+      abi: ARBITRAGE_EXECUTOR_V3_ABI,
+      functionName: "protocolFeeBps",
+    }),
+    publicClient.readContract({
+      address: executor,
+      abi: ARBITRAGE_EXECUTOR_V3_ABI,
+      functionName: "executorRewardBps",
+    }),
+    publicClient.readContract({
+      address: executor,
+      abi: ARBITRAGE_EXECUTOR_V3_ABI,
+      functionName: "weth",
+    }),
+    publicClient.readContract({
+      address: executor,
+      abi: ARBITRAGE_EXECUTOR_V3_ABI,
+      functionName: "mintClubBond",
+    }),
+    publicClient.readContract({
+      address: executor,
+      abi: ARBITRAGE_EXECUTOR_V3_ABI,
+      functionName: "onchainRouter",
+    }),
+  ]);
+  if (chainId !== base.id) throw new Error("Relay is not connected to Base.");
+  if (!code || code === "0x") throw new Error("Arbitrage contract not found.");
+  if (protocolFeeBps !== 0 || executorRewardBps !== 2_000) {
+    throw new Error("Arbitrage fee policy changed.");
+  }
+  if (getAddress(weth) !== CHAINS.base.weth)
+    throw new Error("Arbitrage WETH address changed.");
+  if (getAddress(mintClubBond) !== CHAINS.base.mintClubBond)
+    throw new Error("Mint Club address changed.");
+  if (getAddress(onchainRouter) !== getAddress(EXPECTED_ROUTER))
+    throw new Error("Arbitrage router changed.");
+  return { account, balance, executor, publicClient, transport };
+}
+
+export async function GET(request: Request) {
+  const limited = rateLimit(request, "arbitrage-relay-status", {
+    limit: 30,
+    windowMs: 60_000,
+  });
+  if (limited) return limited;
+  try {
+    const { balance } = await relayContext();
+    const requiredBalance = minimumRelayBalance();
+    if (balance < requiredBalance) {
+      return NextResponse.json({
+        ready: false,
+        state: "low-balance",
+        message: "Relay needs Base ETH.",
+        balanceRaw: balance.toString(),
+        requiredBalanceRaw: requiredBalance.toString(),
+      });
+    }
+    const gasBudget = currentRelayGasBudget();
+    if (gasBudget.spent + gasBudget.reserved >= dailyGasLimit()) {
+      return NextResponse.json({
+        ready: false,
+        state: "paused",
+        message: "Relay paused for today.",
+        balanceRaw: balance.toString(),
+        requiredBalanceRaw: requiredBalance.toString(),
+      });
+    }
+    return NextResponse.json({
+      ready: true,
+      state: "ready",
+      message: "Automatic execution is ready.",
+      balanceRaw: balance.toString(),
+      requiredBalanceRaw: requiredBalance.toString(),
+    });
+  } catch (error) {
+    let requiredBalanceRaw = "100000000000000";
+    try {
+      requiredBalanceRaw = minimumRelayBalance().toString();
+    } catch {
+      // Keep status readable when the configured value itself is invalid.
+    }
+    return NextResponse.json({
+      ready: false,
+      state: "setup-needed",
+      message: compactActionError(error, "Relay setup needed."),
+      balanceRaw: null,
+      requiredBalanceRaw,
+    });
+  }
 }
 
 export async function POST(request: Request) {
@@ -99,9 +247,15 @@ export async function POST(request: Request) {
     }
     relayLocks.add(lockKey);
     try {
-      const account = privateKeyToAccount(relayPrivateKey());
-      const transport = http(rpcUrl(), { timeout: 12_000 });
-      const publicClient = createPublicClient({ chain: base, transport });
+      const { account, balance, executor, publicClient, transport } =
+        await relayContext();
+      if (balance < minimumRelayBalance()) {
+        throw new Error("Relay needs Base ETH.");
+      }
+      const gasBudget = currentRelayGasBudget();
+      if (gasBudget.spent + gasBudget.reserved >= dailyGasLimit()) {
+        throw new Error("Relay paused for today.");
+      }
       const walletClient = createWalletClient({
         account,
         chain: base,
@@ -141,7 +295,7 @@ export async function POST(request: Request) {
       try {
         const simulation = await publicClient.simulateContract({
           account,
-          address: execution.executor,
+          address: executor,
           abi: ARBITRAGE_EXECUTOR_V3_ABI,
           functionName: "execute",
           args,

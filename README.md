@@ -168,6 +168,7 @@ BASE_RPC_URL=
 ROBINHOOD_RPC_URL=
 ARBITRAGE_RELAYER_PRIVATE_KEY=
 ARBITRAGE_RELAY_DAILY_GAS_WEI=1000000000000000
+ARBITRAGE_RELAY_MIN_BALANCE_WEI=100000000000000
 ```
 
 `UNISWAP_API_KEY` and RPC credentials are server-only. `UNISWAP_FEE_RECIPIENT` must be a reviewed project-controlled address.
@@ -192,7 +193,8 @@ NEXT_PUBLIC_ARBITRAGE_EXECUTOR_V3=0xbB7AF71818fD1a269f21D0b5E4d8F7CF5401Ac3C
 ```
 
 Keep the relay wallet funded only for Base gas. The relay cannot move funds beyond the user-approved strategy limits.
-The default per-instance relay ceiling is `0.001 ETH` per UTC day. Set a lower production value after measuring Base execution costs.
+The default in-memory relay ceiling is `0.001 ETH` per UTC day and per running server instance. The dedicated wallet's small balance is the global hard spending cap across server instances.
+New positions are blocked when the relay has less than `0.0001 ETH` by default. The app checks the relay key, Base connection, executor bytecode, fee policy and gas balance before enabling execution.
 
 ### Persistent keeper only
 

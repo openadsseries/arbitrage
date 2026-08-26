@@ -34,10 +34,11 @@ The user approves and receives the market's Reserve Token. WETH is only an inter
 
 1. Set `NEXT_PUBLIC_ARBITRAGE_EXECUTOR_V3=0xbB7AF71818fD1a269f21D0b5E4d8F7CF5401Ac3C`.
 2. Set `ARBITRAGE_EXECUTOR_V3_DEPLOYMENT_BLOCK=50422622`.
-3. Store `BASE_RPC_URL` and `ARBITRAGE_KEEPER_PRIVATE_KEY` only in the keeper runtime.
-4. Fund the dedicated keeper wallet with only enough ETH for gas.
-5. Run `npm run keeper` as a persistent process outside Vercel. Vercel serves the website and read APIs, not the always-on keeper.
-6. Complete one small end-to-end Base strategy before opening the action broadly.
+3. Store `BASE_RPC_URL` and `ARBITRAGE_RELAYER_PRIVATE_KEY` in the web deployment.
+4. Fund the dedicated relay wallet with only enough Base ETH for gas.
+5. Run `npm run check:arbitrage` before deployment. The open browser tab checks prices and the server relay submits eligible executions.
+6. Use `npm run keeper` outside Vercel only when an optional always-on keeper is deliberately operated with a separate key.
+7. Complete one small end-to-end Base strategy before opening the action broadly.
 
 ## Release checks
 

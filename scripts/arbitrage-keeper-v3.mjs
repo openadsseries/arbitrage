@@ -1,7 +1,16 @@
 import { BOND_ABI, binaryReverseMint } from "@mint.club/v2-sdk";
-import { createPublicClient, createWalletClient, formatUnits, getAddress, http, parseAbi } from "viem";
+import {
+  createPublicClient,
+  createWalletClient,
+  fallback,
+  formatUnits,
+  getAddress,
+  http,
+  parseAbi,
+} from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { base } from "viem/chains";
+import { estimateContractTotalFee } from "viem/op-stack";
 import { maximizeExecutable } from "./arbitrage-optimizer.mjs";
 
 const WETH = "0x4200000000000000000000000000000000000006";
@@ -14,9 +23,12 @@ const MAX_POLL_MS = 60_000;
 const GAS_MARGIN_BPS = BigInt(process.env.ARBITRAGE_GAS_MARGIN_BPS || "12000");
 const RUN_ONCE = process.env.ARBITRAGE_KEEPER_ONCE === "1";
 
-if (SLIPPAGE_BPS < 0n || SLIPPAGE_BPS >= 5_000n) throw new Error("ARBITRAGE_SLIPPAGE_BPS is outside the safe range.");
-if (!Number.isFinite(POLL_MS) || POLL_MS < 1_000) throw new Error("ARBITRAGE_POLL_MS must be at least 1000.");
-if (GAS_MARGIN_BPS < BPS) throw new Error("ARBITRAGE_GAS_MARGIN_BPS must be at least 10000.");
+if (SLIPPAGE_BPS < 0n || SLIPPAGE_BPS >= 5_000n)
+  throw new Error("ARBITRAGE_SLIPPAGE_BPS is outside the safe range.");
+if (!Number.isFinite(POLL_MS) || POLL_MS < 1_000)
+  throw new Error("ARBITRAGE_POLL_MS must be at least 1000.");
+if (GAS_MARGIN_BPS < BPS)
+  throw new Error("ARBITRAGE_GAS_MARGIN_BPS must be at least 10000.");
 
 const EXECUTOR_ABI = parseAbi([
   "function strategyCount() view returns (uint256)",
@@ -43,9 +55,15 @@ function required(name) {
 
 const executor = getAddress(required("NEXT_PUBLIC_ARBITRAGE_EXECUTOR_V3"));
 const privateKey = required("ARBITRAGE_KEEPER_PRIVATE_KEY");
-if (!/^0x[0-9a-fA-F]{64}$/.test(privateKey)) throw new Error("ARBITRAGE_KEEPER_PRIVATE_KEY is invalid.");
+if (!/^0x[0-9a-fA-F]{64}$/.test(privateKey))
+  throw new Error("ARBITRAGE_KEEPER_PRIVATE_KEY is invalid.");
 const account = privateKeyToAccount(privateKey);
-const transport = http(required("BASE_RPC_URL"));
+const transport = fallback(
+  [required("BASE_RPC_URL"), "https://mainnet.base.org"]
+    .filter((url, index, endpoints) => endpoints.indexOf(url) === index)
+    .map((url) => http(url, { retryCount: 0, timeout: 8_000 })),
+  { rank: false, retryCount: 0 },
+);
 const client = createPublicClient({ chain: base, transport });
 const wallet = createWalletClient({ account, chain: base, transport });
 const cooldown = new Map();
@@ -60,13 +78,15 @@ function wait(milliseconds) {
 }
 
 function down(amount) {
-  return amount * (BPS - SLIPPAGE_BPS) / BPS;
+  return (amount * (BPS - SLIPPAGE_BPS)) / BPS;
 }
 
 function ownerProfit(grossProfit, protocolFeeBps, executorRewardBps) {
-  return grossProfit
-    - grossProfit * BigInt(protocolFeeBps) / BPS
-    - grossProfit * BigInt(executorRewardBps) / BPS;
+  return (
+    grossProfit -
+    (grossProfit * BigInt(protocolFeeBps)) / BPS -
+    (grossProfit * BigInt(executorRewardBps)) / BPS
+  );
 }
 
 async function quoteExactInput(tokenIn, tokenOut, amountIn) {
@@ -84,17 +104,58 @@ async function quoteExactInput(tokenIn, tokenOut, amountIn) {
 
 async function readBondState(strategy) {
   const [steps, currentSupply, maxSupply, decimals, bond] = await Promise.all([
-    client.readContract({ address: BOND, abi: BOND_ABI, functionName: "getSteps", args: [strategy.hToken], blockTag: "pending" }),
-    client.readContract({ address: strategy.hToken, abi: ERC20_ABI, functionName: "totalSupply", blockTag: "pending" }),
-    client.readContract({ address: BOND, abi: BOND_ABI, functionName: "maxSupply", args: [strategy.hToken], blockTag: "pending" }),
-    client.readContract({ address: strategy.hToken, abi: ERC20_ABI, functionName: "decimals", blockTag: "pending" }),
-    client.readContract({ address: BOND, abi: BOND_ABI, functionName: "tokenBond", args: [strategy.hToken], blockTag: "pending" }),
+    client.readContract({
+      address: BOND,
+      abi: BOND_ABI,
+      functionName: "getSteps",
+      args: [strategy.hToken],
+      blockTag: "pending",
+    }),
+    client.readContract({
+      address: strategy.hToken,
+      abi: ERC20_ABI,
+      functionName: "totalSupply",
+      blockTag: "pending",
+    }),
+    client.readContract({
+      address: BOND,
+      abi: BOND_ABI,
+      functionName: "maxSupply",
+      args: [strategy.hToken],
+      blockTag: "pending",
+    }),
+    client.readContract({
+      address: strategy.hToken,
+      abi: ERC20_ABI,
+      functionName: "decimals",
+      blockTag: "pending",
+    }),
+    client.readContract({
+      address: BOND,
+      abi: BOND_ABI,
+      functionName: "tokenBond",
+      args: [strategy.hToken],
+      blockTag: "pending",
+    }),
   ]);
-  if (getAddress(bond[4]) !== getAddress(strategy.reserveToken)) throw new Error("Reserve Token changed.");
-  return { steps, currentSupply, maxSupply, decimals, mintRoyalty: Number(bond[1]) };
+  if (getAddress(bond[4]) !== getAddress(strategy.reserveToken))
+    throw new Error("Reserve Token changed.");
+  return {
+    steps,
+    currentSupply,
+    maxSupply,
+    decimals,
+    mintRoyalty: Number(bond[1]),
+  };
 }
 
-async function mintThenSell(strategy, budget, bondState, protocolFeeBps, rewardBps) {
+async function mintThenSell(
+  strategy,
+  budget,
+  bondState,
+  protocolFeeBps,
+  rewardBps,
+) {
   const hAmount = binaryReverseMint({
     reserveAmount: budget,
     bondSteps: bondState.steps,
@@ -114,9 +175,17 @@ async function mintThenSell(strategy, budget, bondState, protocolFeeBps, rewardB
   });
   if (reserveRequired <= 0n || reserveRequired > budget) return null;
   const wethOut = await quoteExactInput(strategy.hToken, WETH, hAmount);
-  const reserveOut = await quoteExactInput(WETH, strategy.reserveToken, wethOut);
+  const reserveOut = await quoteExactInput(
+    WETH,
+    strategy.reserveToken,
+    wethOut,
+  );
   if (reserveOut <= reserveRequired) return null;
-  const net = ownerProfit(reserveOut - reserveRequired, protocolFeeBps, rewardBps);
+  const net = ownerProfit(
+    reserveOut - reserveRequired,
+    protocolFeeBps,
+    rewardBps,
+  );
   if (net < strategy.minProfitReserve) return null;
   return {
     direction: 0,
@@ -166,7 +235,8 @@ async function bestCandidates(strategy, available, protocolFeeBps, rewardBps) {
   const [mintCandidate, redeemCandidate] = await Promise.all([
     maximizeExecutable(
       available,
-      (budget) => mintThenSell(strategy, budget, bondState, protocolFeeBps, rewardBps),
+      (budget) =>
+        mintThenSell(strategy, budget, bondState, protocolFeeBps, rewardBps),
       { coarseSteps: 7, refinementRounds: 3 },
     ),
     maximizeExecutable(
@@ -177,21 +247,49 @@ async function bestCandidates(strategy, available, protocolFeeBps, rewardBps) {
   ]);
   return [mintCandidate, redeemCandidate]
     .filter(Boolean)
-    .sort((left, right) => left.net > right.net ? -1 : left.net < right.net ? 1 : 0);
+    .sort((left, right) =>
+      left.net > right.net ? -1 : left.net < right.net ? 1 : 0,
+    );
 }
 
 async function tryExecute(strategyId, strategy, protocolFeeBps, rewardBps) {
   if ((cooldown.get(strategyId) || 0) > Date.now()) return;
   const [balance, allowance, reserveDecimals] = await Promise.all([
-    client.readContract({ address: strategy.reserveToken, abi: ERC20_ABI, functionName: "balanceOf", args: [strategy.owner], blockTag: "pending" }),
-    client.readContract({ address: strategy.reserveToken, abi: ERC20_ABI, functionName: "allowance", args: [strategy.owner, executor], blockTag: "pending" }),
-    client.readContract({ address: strategy.reserveToken, abi: ERC20_ABI, functionName: "decimals", blockTag: "pending" }),
+    client.readContract({
+      address: strategy.reserveToken,
+      abi: ERC20_ABI,
+      functionName: "balanceOf",
+      args: [strategy.owner],
+      blockTag: "pending",
+    }),
+    client.readContract({
+      address: strategy.reserveToken,
+      abi: ERC20_ABI,
+      functionName: "allowance",
+      args: [strategy.owner, executor],
+      blockTag: "pending",
+    }),
+    client.readContract({
+      address: strategy.reserveToken,
+      abi: ERC20_ABI,
+      functionName: "decimals",
+      blockTag: "pending",
+    }),
   ]);
-  const available = [strategy.maxReserve, strategy.remainingVolume, balance, allowance]
-    .reduce((left, right) => left < right ? left : right);
+  const available = [
+    strategy.maxReserve,
+    strategy.remainingVolume,
+    balance,
+    allowance,
+  ].reduce((left, right) => (left < right ? left : right));
   if (available <= 0n) return;
 
-  const candidates = await bestCandidates(strategy, available, protocolFeeBps, rewardBps);
+  const candidates = await bestCandidates(
+    strategy,
+    available,
+    protocolFeeBps,
+    rewardBps,
+  );
   for (const candidate of candidates) {
     try {
       const args = [strategyId, candidate.direction, candidate.params];
@@ -203,38 +301,65 @@ async function tryExecute(strategyId, strategy, protocolFeeBps, rewardBps) {
         args,
         blockTag: "pending",
       });
-      const [gas, gasPrice] = await Promise.all([
-        client.estimateContractGas({ ...simulation.request, account, blockTag: "pending" }),
-        client.getGasPrice(),
-      ]);
-      const simulatedOwnerProfit = simulation.result > candidate.amount ? simulation.result - candidate.amount : 0n;
+      const totalFee = await estimateContractTotalFee(client, {
+        account,
+        address: executor,
+        abi: EXECUTOR_ABI,
+        functionName: "execute",
+        args,
+      });
+      const simulatedOwnerProfit =
+        simulation.result > candidate.amount
+          ? simulation.result - candidate.amount
+          : 0n;
       if (simulatedOwnerProfit < strategy.minProfitReserve) continue;
       const ownerShareBps = BPS - BigInt(protocolFeeBps) - BigInt(rewardBps);
-      const expectedRewardReserve = ownerShareBps > 0n
-        ? simulatedOwnerProfit * BigInt(rewardBps) / ownerShareBps
-        : 0n;
-      const rewardWeth = await quoteExactInput(strategy.reserveToken, WETH, expectedRewardReserve).catch(() => 0n);
-      const requiredGasCover = gas * gasPrice * GAS_MARGIN_BPS / BPS;
+      const expectedRewardReserve =
+        ownerShareBps > 0n
+          ? (simulatedOwnerProfit * BigInt(rewardBps)) / ownerShareBps
+          : 0n;
+      const rewardWeth = await quoteExactInput(
+        strategy.reserveToken,
+        WETH,
+        expectedRewardReserve,
+      ).catch(() => 0n);
+      const requiredGasCover = (totalFee * GAS_MARGIN_BPS) / BPS;
       if (rewardWeth < requiredGasCover) continue;
 
       const hash = await wallet.writeContract(simulation.request);
       const receipt = await client.waitForTransactionReceipt({ hash });
-      if (receipt.status !== "success") throw new Error(`Execution reverted: ${hash}`);
-      console.log(`[executed] strategy=${strategyId} ownerNet=${formatUnits(simulatedOwnerProfit, reserveDecimals)} reserve tx=${hash}`);
+      if (receipt.status !== "success")
+        throw new Error(`Execution reverted: ${hash}`);
+      console.log(
+        `[executed] strategy=${strategyId} ownerNet=${formatUnits(simulatedOwnerProfit, reserveDecimals)} reserve tx=${hash}`,
+      );
       cooldown.set(strategyId, Date.now() + POLL_MS);
       return;
     } catch (error) {
-      console.warn(`[candidate-rejected] strategy=${strategyId} ${conciseError(error)}`);
+      console.warn(
+        `[candidate-rejected] strategy=${strategyId} ${conciseError(error)}`,
+      );
     }
   }
 }
 
 async function readFeePolicy() {
   const [protocolFeeBps, rewardBps] = await Promise.all([
-    client.readContract({ address: executor, abi: EXECUTOR_ABI, functionName: "protocolFeeBps", blockTag: "pending" }),
-    client.readContract({ address: executor, abi: EXECUTOR_ABI, functionName: "executorRewardBps", blockTag: "pending" }),
+    client.readContract({
+      address: executor,
+      abi: EXECUTOR_ABI,
+      functionName: "protocolFeeBps",
+      blockTag: "pending",
+    }),
+    client.readContract({
+      address: executor,
+      abi: EXECUTOR_ABI,
+      functionName: "executorRewardBps",
+      blockTag: "pending",
+    }),
   ]);
-  if (protocolFeeBps !== 0 || rewardBps !== 2_000) throw new Error("Unexpected executor fee policy.");
+  if (protocolFeeBps !== 0 || rewardBps !== 2_000)
+    throw new Error("Unexpected executor fee policy.");
   return [protocolFeeBps, rewardBps];
 }
 
@@ -255,14 +380,26 @@ async function readFeePolicyWithRetry() {
 async function poll(protocolFeeBps, rewardBps) {
   try {
     const [count, block] = await Promise.all([
-      client.readContract({ address: executor, abi: EXECUTOR_ABI, functionName: "strategyCount", blockTag: "pending" }),
+      client.readContract({
+        address: executor,
+        abi: EXECUTOR_ABI,
+        functionName: "strategyCount",
+        blockTag: "pending",
+      }),
       client.getBlock({ blockTag: "pending" }),
     ]);
-    const ids = Array.from({ length: Number(count) }, (_, index) => BigInt(index + 1));
+    const ids = Array.from({ length: Number(count) }, (_, index) =>
+      BigInt(index + 1),
+    );
     const results = await client.multicall({
       allowFailure: true,
       blockTag: "pending",
-      contracts: ids.map((id) => ({ address: executor, abi: EXECUTOR_ABI, functionName: "strategies", args: [id] })),
+      contracts: ids.map((id) => ({
+        address: executor,
+        abi: EXECUTOR_ABI,
+        functionName: "strategies",
+        args: [id],
+      })),
     });
     for (let index = 0; index < results.length; index += 1) {
       const result = results[index];
@@ -279,11 +416,19 @@ async function poll(protocolFeeBps, rewardBps) {
         remainingVolume,
         minProfitReserve,
       ] = result.result;
-      const expired = BigInt(validUntil) !== 0n && BigInt(validUntil) < block.timestamp;
+      const expired =
+        BigInt(validUntil) !== 0n && BigInt(validUntil) < block.timestamp;
       if (!active || expired || remainingVolume === 0n) continue;
       await tryExecute(
         ids[index],
-        { owner, hToken, reserveToken, maxReserve, remainingVolume, minProfitReserve },
+        {
+          owner,
+          hToken,
+          reserveToken,
+          maxReserve,
+          remainingVolume,
+          minProfitReserve,
+        },
         protocolFeeBps,
         rewardBps,
       );
@@ -295,19 +440,25 @@ async function poll(protocolFeeBps, rewardBps) {
   }
 }
 
-console.log(`[keeper] watching continuous Reserve Token executor ${executor} on Base as ${account.address}`);
+console.log(
+  `[keeper] watching continuous Reserve Token executor ${executor} on Base as ${account.address}`,
+);
 const feePolicy = await readFeePolicyWithRetry();
 if (!feePolicy) {
   console.log("[keeper] one check completed: failed");
   process.exitCode = 1;
 } else {
   const [protocolFeeBps, rewardBps] = feePolicy;
-  console.log(`[keeper] policy verified: protocol=${Number(protocolFeeBps) / 100}% executor=${Number(rewardBps) / 100}%`);
+  console.log(
+    `[keeper] policy verified: protocol=${Number(protocolFeeBps) / 100}% executor=${Number(rewardBps) / 100}%`,
+  );
   let nextPollMs = POLL_MS;
   while (true) {
     const healthy = await poll(protocolFeeBps, rewardBps);
     if (RUN_ONCE) {
-      console.log(`[keeper] one check completed: ${healthy ? "healthy" : "failed"}`);
+      console.log(
+        `[keeper] one check completed: ${healthy ? "healthy" : "failed"}`,
+      );
       break;
     }
     nextPollMs = healthy ? POLL_MS : Math.min(nextPollMs * 2, MAX_POLL_MS);

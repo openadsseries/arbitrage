@@ -10,12 +10,17 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { encodeFunctionData, formatUnits, type Address } from "viem";
-import { ArbitrageWatchHelp } from "@/components/arbitrage-watch-help";
+import {
+  ArbitrageWatchHelp,
+  arbitrageWatchLabel,
+  arbitrageWatchPanelTitle,
+} from "@/components/arbitrage-watch-help";
 import { useWallet } from "@/components/wallet-provider";
 import {
   ARBITRAGE_EXECUTOR_V3_ABI,
   ERC20_PERMISSION_ABI,
   getArbitrageMinimumProfit,
+  getArbitrageRepeatLimit,
   type ArbitrageMarketReadiness,
   type ContinuousArbitrageSnapshot,
   type DirectArbitrageExecutionQuote,
@@ -44,6 +49,13 @@ type RelayPayload = {
   execution?: DirectArbitrageExecutionQuote | null;
   error?: string;
 };
+type RelayStatus = {
+  ready: boolean;
+  state: "ready" | "low-balance" | "paused" | "setup-needed";
+  message: string;
+  balanceRaw: string | null;
+  requiredBalanceRaw: string;
+};
 
 class RelayRequestError extends Error {
   payload: RelayPayload;
@@ -58,12 +70,15 @@ class RelayRequestError extends Error {
 const WATCH_VISIBLE_MS = 30_000;
 const WATCH_HIDDEN_MS = 120_000;
 const RELAY_COOLDOWN_MS = 12_000;
+const AUTO_REPEAT_COUNT = 10n;
 const PASSIVE_WATCH_REASONS = new Set([
   "Base is busy. Try again soon.",
   "Gas too high.",
   "Not executable now.",
   "No route now.",
   "Waiting for gas.",
+  "Relay needs Base ETH.",
+  "Relay paused for today.",
 ]);
 
 function relayWatchReason(reason: unknown) {
@@ -133,9 +148,42 @@ export function MarketAutomationPanel({
   const [watchReason, setWatchReason] = useState("");
   const [lastRelayQuote, setLastRelayQuote] =
     useState<DirectArbitrageExecutionQuote | null>(null);
+  const [relayStatus, setRelayStatus] = useState<RelayStatus | null>(null);
   const [showRevoke, setShowRevoke] = useState(false);
   const relayInFlight = useRef(false);
   const relayCooldownUntil = useRef(0);
+
+  const readRelayStatus = useCallback(async () => {
+    const response = await fetch("/api/arbitrage/relay", { cache: "no-store" });
+    const payload = (await response.json()) as RelayStatus & { error?: string };
+    if (!response.ok || typeof payload.ready !== "boolean") {
+      throw new Error(payload.error ?? "Relay status unavailable.");
+    }
+    setRelayStatus(payload);
+    return payload;
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const check = () => {
+      void readRelayStatus().catch((reason) => {
+        if (!active) return;
+        setRelayStatus({
+          ready: false,
+          state: "setup-needed",
+          message: errorMessage(reason, "Relay setup needed."),
+          balanceRaw: null,
+          requiredBalanceRaw: "0",
+        });
+      });
+    };
+    check();
+    const timer = window.setInterval(check, 60_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [readRelayStatus]);
 
   useEffect(() => {
     if (market.chain !== "base" || initialReadiness) return;
@@ -269,15 +317,16 @@ export function MarketAutomationPanel({
         : 0n),
     0n,
   );
-  const activeStatusLabel =
-    watchReason === "Gas too high." ? "Gas wait" : "Watching";
+  const relayReason = relayStatus?.ready === false ? relayStatus.message : "";
+  const effectiveWatchReason = relayReason || watchReason;
+  const activeStatusLabel = arbitrageWatchLabel(effectiveWatchReason);
 
   useEffect(() => {
     onActiveAmountChange?.(running?.maxReservePerExecutionRaw ?? null);
   }, [onActiveAmountChange, running?.maxReservePerExecutionRaw]);
   useEffect(() => {
-    onWatchReasonChange?.(watchReason);
-  }, [onWatchReasonChange, watchReason]);
+    onWatchReasonChange?.(effectiveWatchReason);
+  }, [effectiveWatchReason, onWatchReasonChange]);
 
   const relayStrategy = useCallback(
     async (address: Address, strategyId: string) => {
@@ -295,7 +344,13 @@ export function MarketAutomationPanel({
   );
 
   useEffect(() => {
-    if (!wallet.address || !activeSnapshot?.executor || !running) return;
+    if (
+      !wallet.address ||
+      !activeSnapshot?.executor ||
+      !running ||
+      !relayStatus?.ready
+    )
+      return;
     let active = true;
     let timeout: number | undefined;
     const run = async () => {
@@ -351,6 +406,7 @@ export function MarketAutomationPanel({
     preparation,
     refreshSettledWalletState,
     relayStrategy,
+    relayStatus?.ready,
     running,
     wallet.address,
   ]);
@@ -364,6 +420,9 @@ export function MarketAutomationPanel({
     setWatchReason("");
     let approvalMayRemain = false;
     try {
+      const currentRelayStatus = await readRelayStatus();
+      if (!currentRelayStatus.ready)
+        throw new Error(currentRelayStatus.message);
       const address = wallet.address ?? (await wallet.connect("base"));
       if (!address) throw new Error("Connect a wallet to execute.");
       const currentSnapshot =
@@ -391,7 +450,11 @@ export function MarketAutomationPanel({
       ]);
       if (balance < budgetRaw)
         throw new Error(`Not enough ${market.reserveSymbol} in this wallet.`);
-      const totalLimitRaw = budgetRaw;
+      const totalLimitRaw = getArbitrageRepeatLimit(
+        budgetRaw,
+        balance,
+        AUTO_REPEAT_COUNT,
+      );
       const validUntil = 0;
       const startCall = {
         to: currentSnapshot.executor,
@@ -724,19 +787,15 @@ export function MarketAutomationPanel({
             <span>
               <i /> {activeStatusLabel}
               <ArbitrageWatchHelp
-                reason={watchReason}
+                reason={effectiveWatchReason}
                 quote={lastRelayQuote}
                 reserveSymbol={market.reserveSymbol}
                 reserveDecimals={market.reserveDecimals}
               />
             </span>
-            <small>{watchReason || "This browser"}</small>
+            <small>{effectiveWatchReason || "This browser"}</small>
           </div>
-          <h2>
-            {watchReason === "Gas too high."
-              ? "Waiting for gas."
-              : "Watching prices."}
-          </h2>
+          <h2>{arbitrageWatchPanelTitle(effectiveWatchReason)}</h2>
           <dl className="market-auto-summary">
             <div>
               <dt>Profit</dt>
@@ -779,7 +838,7 @@ export function MarketAutomationPanel({
         <>
           <span className="kicker">2 · Execute</span>
           <div className="market-auto-budget">
-            <label htmlFor="arbitrage-budget">Total amount</label>
+            <label htmlFor="arbitrage-budget">Per run</label>
             <div className="market-auto-budget-input">
               <input
                 id="arbitrage-budget"
@@ -815,12 +874,25 @@ export function MarketAutomationPanel({
           </div>
           <button
             className="button-primary automation-action"
-            disabled={busy || !preparation || Boolean(budgetError)}
+            disabled={
+              busy ||
+              !preparation ||
+              Boolean(budgetError) ||
+              !relayStatus?.ready
+            }
             onClick={() => void execute()}
             type="button"
           >
             {busy ? <LoaderCircle className="spin" /> : <Play />}{" "}
-            {busy ? progress : preparation ? "Execute arbitrage" : "Preparing"}
+            {busy
+              ? progress
+              : !relayStatus
+                ? "Checking setup"
+                : !relayStatus.ready
+                  ? "Setup needed"
+                  : preparation
+                    ? "Execute arbitrage"
+                    : "Preparing"}
           </button>
         </>
       )}
@@ -847,7 +919,7 @@ export function MarketAutomationPanel({
       )}
       <ArbitrageWatchHelp
         trigger="details"
-        reason={watchReason}
+        reason={effectiveWatchReason}
         quote={lastRelayQuote}
         reserveSymbol={market.reserveSymbol}
         reserveDecimals={market.reserveDecimals}

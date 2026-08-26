@@ -6,14 +6,22 @@ import { formatUnits } from "viem";
 import type { DirectArbitrageExecutionQuote } from "@/lib/arbitrage";
 
 function tokenAmount(raw: string, decimals: number) {
-  return Number(formatUnits(BigInt(raw), decimals)).toLocaleString("en-US", { maximumFractionDigits: 8 });
+  return Number(formatUnits(BigInt(raw), decimals)).toLocaleString("en-US", {
+    maximumFractionDigits: 8,
+  });
 }
 
 function wethAmount(raw: string) {
-  return Number(formatUnits(BigInt(raw), 18)).toLocaleString("en-US", { maximumFractionDigits: 8 });
+  return Number(formatUnits(BigInt(raw), 18)).toLocaleString("en-US", {
+    maximumFractionDigits: 8,
+  });
 }
 
-function usdAmount(raw: string, decimals: number, usd: number | null | undefined) {
+function usdAmount(
+  raw: string,
+  decimals: number,
+  usd: number | null | undefined,
+) {
   if (!usd) return null;
   const value = Number(formatUnits(BigInt(raw), decimals)) * usd;
   if (!Number.isFinite(value)) return null;
@@ -25,15 +33,39 @@ function gasCoverage(quote: DirectArbitrageExecutionQuote | null) {
   if (!quote) return null;
   const needed = BigInt(quote.requiredWethRaw);
   if (needed <= 0n) return null;
-  return Number(BigInt(quote.rewardWethRaw) * 1_000n / needed) / 10;
+  return Number((BigInt(quote.rewardWethRaw) * 1_000n) / needed) / 10;
 }
 
-function statusCopy(reason: string) {
+export function arbitrageWatchCopy(reason: string) {
+  if (reason === "Relay setup needed." || reason === "Relay not configured.") {
+    return {
+      title: "Setup needed",
+      meaning: "Automatic execution is not connected to a relay wallet.",
+      action: "Configure and fund the relay before starting arbitrage.",
+    };
+  }
+  if (reason === "Relay needs Base ETH.") {
+    return {
+      title: "Relay needs gas",
+      meaning:
+        "The relay wallet does not have enough Base ETH to submit an execution.",
+      action: "Add Base ETH to the relay wallet, then keep this page open.",
+    };
+  }
+  if (reason === "Relay paused for today.") {
+    return {
+      title: "Paused today",
+      meaning: "The relay reached its daily gas limit.",
+      action: "It resumes automatically after the UTC day changes.",
+    };
+  }
   if (reason === "Gas too high." || reason === "Waiting for gas.") {
     return {
       title: "Waiting for gas",
-      meaning: "There is profit, but the relay reward is smaller than the gas needed to execute.",
-      action: "Use a larger amount, wait for lower gas, or raise the executor reward in a future strategy.",
+      meaning:
+        "There is profit, but the relay reward is smaller than the gas needed to execute.",
+      action:
+        "Use a larger amount, wait for lower gas, or raise the executor reward in a future strategy.",
     };
   }
   if (reason === "Base is busy. Try again soon.") {
@@ -46,15 +78,36 @@ function statusCopy(reason: string) {
   if (reason === "No route now." || reason === "Not executable now.") {
     return {
       title: "Watching",
-      meaning: "The app is checking both directions, but the current route cannot execute profitably.",
-      action: "Wait for the price gap to widen or use a market with deeper liquidity.",
+      meaning:
+        "The app is checking both directions, but the current route cannot execute profitably.",
+      action:
+        "Wait for the price gap to widen or use a market with deeper liquidity.",
     };
   }
   return {
     title: "Watching",
-    meaning: "The route is being checked against price, liquidity, fees, and gas.",
+    meaning:
+      "The route is being checked against price, liquidity, fees, and gas.",
     action: "Keep the page open. It runs when the full route is executable.",
   };
+}
+
+export function arbitrageWatchLabel(reason: string) {
+  const title = arbitrageWatchCopy(reason).title;
+  if (title === "Relay needs gas") return "Gas needed";
+  if (title === "Paused today") return "Paused";
+  if (title === "Waiting for gas") return "Gas wait";
+  if (title === "Network busy") return "Network wait";
+  return title;
+}
+
+export function arbitrageWatchPanelTitle(reason: string) {
+  const title = arbitrageWatchCopy(reason).title;
+  if (title === "Setup needed") return "Setup needed.";
+  if (title === "Relay needs gas") return "Relay needs gas.";
+  if (title === "Paused today") return "Paused today.";
+  if (title === "Waiting for gas") return "Waiting for gas.";
+  return "Watching prices.";
 }
 
 export function ArbitrageWatchHelp({
@@ -71,34 +124,101 @@ export function ArbitrageWatchHelp({
   trigger?: "icon" | "details";
 }) {
   const [open, setOpen] = useState(false);
-  const copy = statusCopy(reason);
-  const profitUsd = quote && usdAmount(quote.expectedOwnerProfitRaw, reserveDecimals, quote.reserveUsd);
+  const copy = arbitrageWatchCopy(reason);
+  const profitUsd =
+    quote &&
+    usdAmount(quote.expectedOwnerProfitRaw, reserveDecimals, quote.reserveUsd);
   const rewardUsd = quote && usdAmount(quote.rewardWethRaw, 18, quote.wethUsd);
   const gasUsd = quote && usdAmount(quote.requiredWethRaw, 18, quote.wethUsd);
   const coverage = gasCoverage(quote);
-  const meaning = copy.title === "Waiting for gas" && coverage !== null
-    ? `The relay reward covers ${coverage}% of gas, so it waits.`
-    : copy.meaning;
+  const meaning =
+    copy.title === "Waiting for gas" && coverage !== null
+      ? `The relay reward covers ${coverage}% of gas, so it waits.`
+      : copy.meaning;
 
-  return <>
-    {trigger === "details"
-      ? <button className="market-details-trigger" onClick={() => setOpen(true)} type="button"><Info /> Details</button>
-      : <button className="watch-help-trigger" aria-label="Explain status" onClick={() => setOpen(true)} type="button"><CircleHelp /></button>}
-    {open && <div className="market-details-layer" role="presentation" onMouseDown={() => setOpen(false)}>
-      <section className="market-details-dialog" aria-label="Arbitrage status" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
-        <button className="market-details-close" aria-label="Close status" onClick={() => setOpen(false)} type="button"><X /></button>
-        <span className="kicker">Status</span>
-        <h2>{copy.title}</h2>
-        <div className="market-details-grid status-details-grid">
-          <div><strong>Meaning</strong><p>{meaning}</p></div>
-          <div><strong>What helps</strong><p>{copy.action}</p></div>
+  return (
+    <>
+      {trigger === "details" ? (
+        <button
+          className="market-details-trigger"
+          onClick={() => setOpen(true)}
+          type="button"
+        >
+          <Info /> Details
+        </button>
+      ) : (
+        <button
+          className="watch-help-trigger"
+          aria-label="Explain status"
+          onClick={() => setOpen(true)}
+          type="button"
+        >
+          <CircleHelp />
+        </button>
+      )}
+      {open && (
+        <div
+          className="market-details-layer"
+          role="presentation"
+          onMouseDown={() => setOpen(false)}
+        >
+          <section
+            className="market-details-dialog"
+            aria-label="Arbitrage status"
+            role="dialog"
+            aria-modal="true"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <button
+              className="market-details-close"
+              aria-label="Close status"
+              onClick={() => setOpen(false)}
+              type="button"
+            >
+              <X />
+            </button>
+            <span className="kicker">Status</span>
+            <h2>{copy.title}</h2>
+            <div className="market-details-grid status-details-grid">
+              <div>
+                <strong>Meaning</strong>
+                <p>{meaning}</p>
+              </div>
+              <div>
+                <strong>What helps</strong>
+                <p>{copy.action}</p>
+              </div>
+            </div>
+            {quote && (
+              <dl>
+                <div>
+                  <dt>Profit</dt>
+                  <dd>
+                    +
+                    {tokenAmount(quote.expectedOwnerProfitRaw, reserveDecimals)}{" "}
+                    {reserveSymbol}
+                    {profitUsd ? ` · ≈ ${profitUsd}` : ""}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Relay reward</dt>
+                  <dd>
+                    {wethAmount(quote.rewardWethRaw)} WETH
+                    {rewardUsd ? ` · ≈ ${rewardUsd}` : ""}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Gas needed</dt>
+                  <dd>
+                    {wethAmount(quote.requiredWethRaw)} WETH
+                    {gasUsd ? ` · ≈ ${gasUsd}` : ""}
+                  </dd>
+                </div>
+              </dl>
+            )}
+          </section>
         </div>
-        {quote && <dl>
-          <div><dt>Profit</dt><dd>+{tokenAmount(quote.expectedOwnerProfitRaw, reserveDecimals)} {reserveSymbol}{profitUsd ? ` · ≈ ${profitUsd}` : ""}</dd></div>
-          <div><dt>Relay reward</dt><dd>{wethAmount(quote.rewardWethRaw)} WETH{rewardUsd ? ` · ≈ ${rewardUsd}` : ""}</dd></div>
-          <div><dt>Gas needed</dt><dd>{wethAmount(quote.requiredWethRaw)} WETH{gasUsd ? ` · ≈ ${gasUsd}` : ""}</dd></div>
-        </dl>}
-      </section>
-    </div>}
-  </>;
+      )}
+    </>
+  );
 }

@@ -3,6 +3,7 @@ import {
   calculateArbitrageRoute,
   getArbitrageCurveAmounts,
   getArbitrageMinimumProfit,
+  getArbitrageRepeatLimit,
   selectBestArbitrageSample,
 } from "./arbitrage";
 
@@ -49,7 +50,15 @@ describe("arbitrage opportunity math", () => {
   });
 
   it("builds a small bounded set of quote sizes ending at the user's budget", () => {
-    expect(getArbitrageCurveAmounts(100n)).toEqual([3n, 6n, 12n, 25n, 50n, 75n, 100n]);
+    expect(getArbitrageCurveAmounts(100n)).toEqual([
+      3n,
+      6n,
+      12n,
+      25n,
+      50n,
+      75n,
+      100n,
+    ]);
     expect(getArbitrageCurveAmounts(3n)).toEqual([1n, 2n, 3n]);
     expect(getArbitrageCurveAmounts(0n)).toEqual([]);
   });
@@ -58,6 +67,12 @@ describe("arbitrage opportunity math", () => {
     expect(getArbitrageMinimumProfit(1n)).toBe(1n);
     expect(getArbitrageMinimumProfit(99_999n)).toBe(1n);
     expect(getArbitrageMinimumProfit(1_000_000n)).toBe(10n);
+  });
+
+  it("sets ten runs and caps them at the wallet balance", () => {
+    expect(getArbitrageRepeatLimit(10n, 500n)).toBe(100n);
+    expect(getArbitrageRepeatLimit(10n, 73n)).toBe(73n);
+    expect(getArbitrageRepeatLimit(0n, 100n)).toBe(0n);
   });
 
   it("keeps a smaller profitable size when the full budget loses to price impact", () => {

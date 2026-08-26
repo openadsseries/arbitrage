@@ -10,6 +10,7 @@
     "keeper:continuous": "node --env-file=.env.local scripts/arbitrage-keeper-v3.mjs",
     "keeper:one-shot": "node --env-file=.env.local scripts/arbitrage-keeper-v2.mjs",
     "keeper:legacy": "node --env-file=.env.local scripts/arbitrage-keeper.mjs",
+    "check:arbitrage": "node --env-file-if-exists=.env.local scripts/check-arbitrage-readiness.mjs",
     "lint": "eslint .",
     "test": "vitest run"
   },

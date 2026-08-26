@@ -4,7 +4,10 @@ import Image from "next/image";
 import { useCallback, useMemo, useState } from "react";
 import { ExternalLink, LoaderCircle, Pause } from "lucide-react";
 import { formatUnits } from "viem";
-import { ArbitrageWatchHelp } from "@/components/arbitrage-watch-help";
+import {
+  ArbitrageWatchHelp,
+  arbitrageWatchLabel,
+} from "@/components/arbitrage-watch-help";
 import { useWallet } from "@/components/wallet-provider";
 import { tokenLogoUrl } from "@/components/token-logo";
 import {
@@ -102,10 +105,7 @@ export function MarketArbitrageHistory({
     (total, execution) => total + walletProfitRaw(execution),
     0n,
   );
-  const activeStatus =
-    watchReason === "Gas too high." || watchReason === "Waiting for gas."
-      ? "Gas wait"
-      : "Watching";
+  const activeStatus = arbitrageWatchLabel(watchReason ?? "");
 
   async function stop(strategy: ContinuousArbitrageStrategy) {
     if (!wallet.address || !snapshot?.executor) return;

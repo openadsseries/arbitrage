@@ -37,6 +37,9 @@ export const ARBITRAGE_EXECUTOR_V3_ABI = parseAbi([
   "function activeStrategyId(address owner,address reserveToken) view returns (uint256)",
   "function protocolFeeBps() view returns (uint16)",
   "function executorRewardBps() view returns (uint16)",
+  "function weth() view returns (address)",
+  "function mintClubBond() view returns (address)",
+  "function onchainRouter() view returns (address)",
   "event StrategyStarted(uint256 indexed strategyId,address indexed owner,address indexed hToken,address reserveToken,uint256 maxReservePerExecution,uint256 totalVolume,uint256 minProfitReserve,uint40 validUntil)",
   "event StrategyStopped(uint256 indexed strategyId,address indexed owner)",
   "event ArbitrageExecuted(uint256 indexed strategyId,address indexed owner,address indexed executor,uint8 direction,address reserveToken,uint256 amountInReserve,uint256 amountReturnedReserve,uint256 grossProfitReserve,uint256 protocolFeeReserve,uint256 executorRewardReserve,uint256 ownerProfitReserve,uint256 remainingVolume,uint64 executionCount)",
@@ -268,17 +271,26 @@ const MINIMUM_PROFIT_DENOMINATOR = 100_000n;
 
 export function getArbitrageCurveAmounts(maximum: bigint) {
   if (maximum <= 0n) return [];
-  if (maximum <= 7n) return Array.from({ length: Number(maximum) }, (_, index) => BigInt(index + 1));
+  if (maximum <= 7n)
+    return Array.from({ length: Number(maximum) }, (_, index) =>
+      BigInt(index + 1),
+    );
 
-  return [...new Set([
-    maximum / 32n,
-    maximum / 16n,
-    maximum / 8n,
-    maximum / 4n,
-    maximum / 2n,
-    maximum * 3n / 4n,
-    maximum,
-  ].filter((amount) => amount > 0n).map(String))].map(BigInt);
+  return [
+    ...new Set(
+      [
+        maximum / 32n,
+        maximum / 16n,
+        maximum / 8n,
+        maximum / 4n,
+        maximum / 2n,
+        (maximum * 3n) / 4n,
+        maximum,
+      ]
+        .filter((amount) => amount > 0n)
+        .map(String),
+    ),
+  ].map(BigInt);
 }
 
 /**
@@ -290,6 +302,16 @@ export function getArbitrageMinimumProfit(maximum: bigint) {
   if (maximum <= 0n) return 1n;
   const scaled = maximum / MINIMUM_PROFIT_DENOMINATOR;
   return scaled > 0n ? scaled : 1n;
+}
+
+export function getArbitrageRepeatLimit(
+  perRun: bigint,
+  available: bigint,
+  repeatCount = 10n,
+) {
+  if (perRun <= 0n || available <= 0n || repeatCount <= 0n) return 0n;
+  const repeated = perRun * repeatCount;
+  return available < repeated ? available : repeated;
 }
 
 export function calculateArbitrageRoute({
@@ -307,15 +329,18 @@ export function calculateArbitrageRoute({
   protocolFeeBps: number;
   executorRewardBps: number;
 }): ArbitrageOpportunityRoute {
-  const grossDifference = amountOut >= amountIn ? amountOut - amountIn : -(amountIn - amountOut);
-  const ownerDifference = grossDifference <= 0n
-    ? grossDifference
-    : grossDifference
-      - grossDifference * BigInt(protocolFeeBps) / BPS
-      - grossDifference * BigInt(executorRewardBps) / BPS;
+  const grossDifference =
+    amountOut >= amountIn ? amountOut - amountIn : -(amountIn - amountOut);
+  const ownerDifference =
+    grossDifference <= 0n
+      ? grossDifference
+      : grossDifference -
+        (grossDifference * BigInt(protocolFeeBps)) / BPS -
+        (grossDifference * BigInt(executorRewardBps)) / BPS;
   const withinLimit = amountIn <= limit;
 
-  const netReturnBps = amountIn > 0n ? Number(ownerDifference * BPS / amountIn) : 0;
+  const netReturnBps =
+    amountIn > 0n ? Number((ownerDifference * BPS) / amountIn) : 0;
   const netPositive = withinLimit && ownerDifference > 0n;
 
   return {
@@ -332,14 +357,20 @@ export function calculateArbitrageRoute({
   };
 }
 
-export function selectBestArbitrageSample(samples: ArbitrageOpportunitySample[]) {
-  const candidates = samples.flatMap((sample) => sample.routes.map((route) => ({ sample, route })));
-  return candidates.sort((left, right) => {
-    const leftProfit = BigInt(left.route.ownerDifferenceRaw);
-    const rightProfit = BigInt(right.route.ownerDifferenceRaw);
-    if (leftProfit === rightProfit) return 0;
-    return leftProfit > rightProfit ? -1 : 1;
-  })[0] ?? null;
+export function selectBestArbitrageSample(
+  samples: ArbitrageOpportunitySample[],
+) {
+  const candidates = samples.flatMap((sample) =>
+    sample.routes.map((route) => ({ sample, route })),
+  );
+  return (
+    candidates.sort((left, right) => {
+      const leftProfit = BigInt(left.route.ownerDifferenceRaw);
+      const rightProfit = BigInt(right.route.ownerDifferenceRaw);
+      if (leftProfit === rightProfit) return 0;
+      return leftProfit > rightProfit ? -1 : 1;
+    })[0] ?? null
+  );
 }
 
 export function getArbitrageExecutor(chain: ChainKey): Address | null {
