@@ -24,6 +24,31 @@ export type MarketDetailSnapshot = {
   initialOpportunity: ArbitrageOpportunity | null;
 };
 
+async function comparisonForMarket(
+  market: VerifiedMarket,
+  readiness: ArbitrageMarketReadiness | null,
+): Promise<MarketComparisonState> {
+  if (market.chain !== "base" || !readiness) {
+    return { status: "unavailable", reason: "markets-not-ready" };
+  }
+  return readMarketComparison({
+    chain: market.chain,
+    og: readiness.originalMarket.pool
+      ? { token: market.reserveToken, pool: readiness.originalMarket.pool }
+      : null,
+    hyped: readiness.hypedMarket.pool
+      ? { token: market.token, pool: readiness.hypedMarket.pool }
+      : null,
+  });
+}
+
+export async function readFreshMarketComparison(chain: ChainKey, inputAddress: string) {
+  const market = await readVerifiedMarket(chain, getAddress(inputAddress) as Address);
+  if (!market) return null;
+  const readiness = await readArbitrageMarketReadinessForMarket(market).catch(() => null);
+  return comparisonForMarket(market, readiness);
+}
+
 export const readMarketsSnapshot = unstable_cache(
   async (): Promise<MarketsSnapshot> => {
     const results = await Promise.allSettled(MARKET_CHAINS.map((chain) => readVerifiedMarkets(chain)));
@@ -36,8 +61,8 @@ export const readMarketsSnapshot = unstable_cache(
   { revalidate: 30 },
 );
 
-export const readMarketDetailSnapshot = unstable_cache(
-  async (chain: ChainKey, inputAddress: string): Promise<MarketDetailSnapshot | null> => {
+const readMarketDetailCore = unstable_cache(
+  async (chain: ChainKey, inputAddress: string) => {
     const address = getAddress(inputAddress) as Address;
     const market = await readVerifiedMarket(chain, address);
     if (!market) return null;
@@ -46,27 +71,28 @@ export const readMarketDetailSnapshot = unstable_cache(
       return {
         market,
         arbitrageReadiness: null,
-        marketComparison: { status: "unavailable", reason: "markets-not-ready" },
         initialOpportunity: null,
       };
     }
 
     const arbitrageReadiness = await readArbitrageMarketReadinessForMarket(market).catch(() => null);
-    const [marketComparison, initialOpportunity] = await Promise.all([
-      arbitrageReadiness ? readMarketComparison({
-        chain,
-        og: arbitrageReadiness.originalMarket.pool
-          ? { token: market.reserveToken, pool: arbitrageReadiness.originalMarket.pool }
-          : null,
-        hyped: arbitrageReadiness.hypedMarket.pool
-          ? { token: market.token, pool: arbitrageReadiness.hypedMarket.pool }
-          : null,
-      }) : Promise.resolve({ status: "unavailable" as const, reason: "markets-not-ready" as const }),
-      readArbitrageOpportunityForMarket(market, 10n ** BigInt(market.reserveDecimals)).catch(() => null),
-    ]);
+    const initialOpportunity = await readArbitrageOpportunityForMarket(
+      market,
+      10n ** BigInt(market.reserveDecimals),
+    ).catch(() => null);
 
-    return { market, arbitrageReadiness, marketComparison, initialOpportunity };
+    return { market, arbitrageReadiness, initialOpportunity };
   },
-  ["market-detail-v2"],
+  ["market-detail-core-v3"],
   { revalidate: 15 },
 );
+
+export async function readMarketDetailSnapshot(
+  chain: ChainKey,
+  inputAddress: string,
+): Promise<MarketDetailSnapshot | null> {
+  const core = await readMarketDetailCore(chain, inputAddress);
+  if (!core) return null;
+  const marketComparison = await comparisonForMarket(core.market, core.arbitrageReadiness);
+  return { ...core, marketComparison };
+}

@@ -61,6 +61,13 @@ function formatDailyTick(
     date.getUTCMonth() !== previous.getUTCMonth() ||
     date.getUTCFullYear() !== previous.getUTCFullYear();
   const isLast = index === points.length - 1;
+  if (index === 0) {
+    const nextMonthIndex = points.findIndex((point) => {
+      const next = new Date(point.timestamp * 1000);
+      return next.getUTCMonth() !== date.getUTCMonth() || next.getUTCFullYear() !== date.getUTCFullYear();
+    });
+    if (nextMonthIndex > 0 && nextMonthIndex / Math.max(points.length - 1, 1) < 0.12) return "";
+  }
   if (!changedMonth && !isLast) return "";
   const month = new Intl.DateTimeFormat("en-US", {
     month: "short",
@@ -78,13 +85,28 @@ function HistoricalPriceChart({
 }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const [pinnedIndex, setPinnedIndex] = useState<number | null>(null);
-  if (comparison.status !== "ready")
+  if (comparison.status !== "ready") {
+    const copy = comparison.reason === "not-enough-history"
+      ? {
+          title: "Price history is building.",
+          body: "The chart starts after two daily prices are available.",
+        }
+      : comparison.reason === "markets-not-ready"
+        ? {
+            title: "Price history starts when both markets are live.",
+            body: "The current market state is still shown above.",
+          }
+        : {
+            title: "Loading price history.",
+            body: "Current onchain prices are already available.",
+          };
     return (
-      <div className="price-history-unavailable">
-        <strong>Price history is not available yet.</strong>
-        <span>The live result above still uses current onchain prices.</span>
+      <div className="price-history-unavailable" aria-live="polite">
+        <strong>{copy.title}</strong>
+        <span>{copy.body}</span>
       </div>
     );
+  }
 
   const chain = CHAINS[market.chain];
   const points = comparison.data.points;
@@ -313,6 +335,64 @@ export function ArbitragePriceGap({
   const [quotedAmountRaw, setQuotedAmountRaw] = useState<bigint | null>(
     checkedAmountRaw,
   );
+  const [comparisonResult, setComparisonResult] = useState({
+    token: market.token,
+    value: marketComparison,
+  });
+  const resolvedComparison = comparisonResult.token === market.token
+    ? comparisonResult.value
+    : marketComparison;
+
+  useEffect(() => {
+    if (
+      resolvedComparison.status === "ready" ||
+      resolvedComparison.reason !== "price-history-unavailable"
+    ) return;
+
+    let cancelled = false;
+    let timer: number | null = null;
+    let controller: AbortController | null = null;
+    const delays = [100, 3_000, 10_000];
+    let attempt = 0;
+
+    const refresh = async () => {
+      controller = new AbortController();
+      try {
+        const query = new URLSearchParams({
+          chain: market.chain,
+          address: market.token,
+        });
+        const response = await fetch(`/api/market/history?${query}`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const payload = await response.json() as {
+          comparison?: MarketComparisonState;
+        };
+        if (cancelled) return;
+        if (!response.ok || !payload.comparison) {
+          throw new Error("Price history could not be checked.");
+        }
+        if (payload.comparison.status === "ready") {
+          setComparisonResult({ token: market.token, value: payload.comparison });
+          return;
+        }
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+      }
+      attempt += 1;
+      if (!cancelled && attempt < delays.length) {
+        timer = window.setTimeout(refresh, delays[attempt]);
+      }
+    };
+
+    timer = window.setTimeout(refresh, delays[0]);
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+      controller?.abort();
+    };
+  }, [market.chain, market.token, resolvedComparison]);
 
   useEffect(() => {
     const timer = window.setTimeout(
@@ -490,7 +570,7 @@ export function ArbitragePriceGap({
         </h2>
       </div>
 
-      <HistoricalPriceChart comparison={marketComparison} market={market} />
+      <HistoricalPriceChart comparison={resolvedComparison} market={market} />
 
       {route && (
         <>

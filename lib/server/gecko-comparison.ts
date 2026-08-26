@@ -2,6 +2,7 @@ import "server-only";
 
 import type { Address } from "viem";
 import type { ChainKey } from "@/lib/chains";
+import { readTokenMarketPrice } from "./gecko-market";
 
 const GECKO_ROOT = "https://api.geckoterminal.com/api/v2";
 const GECKO_HEADERS = { accept: "application/json", version: "20230302" };
@@ -23,20 +24,49 @@ export type MarketComparisonState =
 
 type ComparisonMarket = { token: Address; pool: string };
 
-async function dailyCloses(chain: ChainKey, market: ComparisonMarket) {
-  const tokenAddress = market.token.toLowerCase();
-  const query = new URLSearchParams({ aggregate: "1", limit: "90", currency: "usd", token: tokenAddress });
-  const response = await fetch(`${GECKO_ROOT}/networks/${chain}/pools/${market.pool}/ohlcv/day?${query}`, {
-    headers: GECKO_HEADERS,
-    next: { revalidate: 86_400 },
-  });
-  if (!response.ok) throw new Error(`GeckoTerminal returned ${response.status}.`);
-  const ohlcv = await response.json() as OhlcvResponse;
-  return (ohlcv.data?.attributes?.ohlcv_list ?? [])
+type DailyClose = { timestamp: number; close: number };
+
+function parseDailyCloses(payload: OhlcvResponse): DailyClose[] {
+  return (payload.data?.attributes?.ohlcv_list ?? [])
     .flatMap((candle) => Number.isFinite(candle[0]) && Number.isFinite(candle[4]) && candle[4] > 0
       ? [{ timestamp: Math.floor(candle[0] / DAY_SECONDS) * DAY_SECONDS, close: candle[4] }]
       : [])
     .sort((left, right) => left.timestamp - right.timestamp);
+}
+
+async function closesFromPool(chain: ChainKey, token: Address, pool: string) {
+  const tokenAddress = token.toLowerCase();
+  const query = new URLSearchParams({ aggregate: "1", limit: "90", currency: "usd", token: tokenAddress });
+  const url = `${GECKO_ROOT}/networks/${chain}/pools/${pool}/ohlcv/day?${query}`;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const response = await fetch(url, {
+      headers: GECKO_HEADERS,
+      next: { revalidate: 86_400 },
+    });
+    if (response.ok) return parseDailyCloses(await response.json() as OhlcvResponse);
+    const retryable = response.status === 429 || response.status >= 500;
+    if (!retryable || attempt === 1) throw new Error(`GeckoTerminal returned ${response.status}.`);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  return [];
+}
+
+async function dailyCloses(chain: ChainKey, market: ComparisonMarket) {
+  try {
+    const routeCloses = await closesFromPool(chain, market.token, market.pool);
+    if (routeCloses.length > 0) return routeCloses;
+  } catch {
+    // Execution pool identifiers and GeckoTerminal pool identifiers can differ.
+  }
+
+  const fallback = await readTokenMarketPrice(chain, market.token);
+  if (!fallback || fallback.sourcePool.toLowerCase() === market.pool.toLowerCase()) {
+    throw new Error("Price history is temporarily unavailable.");
+  }
+  const fallbackCloses = await closesFromPool(chain, market.token, fallback.sourcePool);
+  if (fallbackCloses.length === 0) throw new Error("Price history is temporarily unavailable.");
+  return fallbackCloses;
 }
 
 function fillDailyComparison(
