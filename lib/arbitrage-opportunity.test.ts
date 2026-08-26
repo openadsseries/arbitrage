@@ -5,6 +5,7 @@ import {
   getArbitrageMinimumProfit,
   getArbitrageRepeatLimit,
   selectBestArbitrageSample,
+  selectDisplayedArbitrageRoute,
 } from "./arbitrage";
 
 describe("arbitrage opportunity math", () => {
@@ -100,5 +101,19 @@ describe("arbitrage opportunity math", () => {
 
     expect(best?.sample.budgetRaw).toBe("25");
     expect(best?.route.netPositive).toBe(true);
+  });
+
+  it("never substitutes a preview quote for an active strategy", () => {
+    const preview = calculateArbitrageRoute({
+      direction: "Mint then sell",
+      amountIn: 100n,
+      amountOut: 110n,
+      limit: 100n,
+      protocolFeeBps: 0,
+      executorRewardBps: 2_000,
+    });
+
+    expect(selectDisplayedArbitrageRoute(true, null, preview)).toBeNull();
+    expect(selectDisplayedArbitrageRoute(false, null, preview)).toBe(preview);
   });
 });

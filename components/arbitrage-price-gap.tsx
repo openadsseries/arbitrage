@@ -9,6 +9,7 @@ import {
   type ArbitrageOpportunity,
   type ArbitrageOpportunityRoute,
   type DirectArbitrageExecutionQuote,
+  selectDisplayedArbitrageRoute,
 } from "@/lib/arbitrage";
 import { CHAINS } from "@/lib/chains";
 import type { VerifiedMarket } from "@/lib/onchain-types";
@@ -539,7 +540,11 @@ export function ArbitragePriceGap({
       profitable: ownerProfit > 0n,
     };
   }, [activeQuote]);
-  const route = activeRoute ?? previewRoute;
+  const route = selectDisplayedArbitrageRoute(
+    active,
+    activeRoute,
+    previewRoute,
+  );
   const netPositive = Boolean(route && (route.netPositive ?? route.profitable));
   const chain = CHAINS[market.chain];
   const ownerReturnRaw = route

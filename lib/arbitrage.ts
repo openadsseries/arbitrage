@@ -209,6 +209,14 @@ export type ArbitrageOpportunityRoute = {
   profitable: boolean;
 };
 
+export function selectDisplayedArbitrageRoute(
+  active: boolean,
+  activeRoute: ArbitrageOpportunityRoute | null,
+  previewRoute: ArbitrageOpportunityRoute | null,
+) {
+  return active ? activeRoute : previewRoute;
+}
+
 export type ArbitrageOpportunitySample = {
   budgetRaw: string;
   hAmountRaw: string;

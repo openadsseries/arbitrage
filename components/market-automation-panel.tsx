@@ -622,6 +622,12 @@ export function MarketAutomationPanel({
     try {
       const publicClient = await wallet.getPublicClient("base");
       const walletClient = await wallet.getWalletClient("base");
+      const currentAllowance = await publicClient.readContract({
+        address: preparation.reserveToken,
+        abi: ERC20_PERMISSION_ABI,
+        functionName: "allowance",
+        args: [wallet.address, activeSnapshot.executor],
+      });
       const stopCall = {
         to: activeSnapshot.executor,
         data: encodeFunctionData({
@@ -639,7 +645,7 @@ export function MarketAutomationPanel({
         }),
       } as const;
       const calls =
-        reserveAllowanceRaw > 0n ? [stopCall, revokeCall] : [stopCall];
+        currentAllowance > 0n ? [stopCall, revokeCall] : [stopCall];
       const atomicStopped = await sendAtomicCallsIfSupported({
         getCapabilities: () =>
           walletClient.getCapabilities({
@@ -684,11 +690,14 @@ export function MarketAutomationPanel({
       setShowRevoke(false);
       setReserveAllowanceRaw(0n);
       setMessage("Arbitrage stopped and permission removed.");
-      await refreshWalletState(wallet.address, preparation);
+      await refreshSettledWalletState(wallet.address, preparation);
     } catch (reason) {
       setShowRevoke(true);
       setError(
         errorMessage(reason, "Could not stop arbitrage and remove permission."),
+      );
+      await refreshSettledWalletState(wallet.address, preparation).catch(
+        () => undefined,
       );
     } finally {
       setBusy(false);

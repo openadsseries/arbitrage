@@ -277,6 +277,9 @@ export async function POST(request: Request) {
         });
       }
       const execution = quote.execution;
+      if (balance < BigInt(execution.requiredWethRaw)) {
+        throw new Error("Relay needs Base ETH.");
+      }
       const settleGasReservation = reserveRelayGas(
         BigInt(execution.totalFeeWethRaw),
       );
