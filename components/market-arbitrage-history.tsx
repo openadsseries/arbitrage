@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ExternalLink, LoaderCircle, Pause } from "lucide-react";
 import { formatUnits } from "viem";
 import { ArbitrageWatchHelp } from "@/components/arbitrage-watch-help";
@@ -14,11 +14,13 @@ import {
   type ContinuousArbitrageSnapshot,
   type ContinuousArbitrageStrategy,
   type DirectArbitrageExecutionQuote,
-  type ReserveArbitrageExecution,
 } from "@/lib/arbitrage";
 import { CHAINS } from "@/lib/chains";
 import { compactActionError as compactError } from "@/lib/errors";
-import { readContinuousArbitrageSnapshot } from "@/lib/continuous-arbitrage-client";
+import {
+  refreshContinuousArbitrageSnapshot,
+  useContinuousArbitrageSnapshot,
+} from "@/lib/continuous-arbitrage-client";
 import type { VerifiedMarket } from "@/lib/onchain-types";
 
 function tokenAmount(raw: string, decimals: number) {
@@ -26,96 +28,84 @@ function tokenAmount(raw: string, decimals: number) {
   return value.toLocaleString("en-US", { maximumFractionDigits: 8 });
 }
 
-function isLive(strategy: ContinuousArbitrageStrategy, snapshot: ContinuousArbitrageSnapshot) {
-  return strategy.active
-    && BigInt(strategy.remainingVolumeRaw) > 0n
-    && (strategy.validUntil === 0 || strategy.validUntil > snapshot.readTimestamp);
+function isLive(
+  strategy: ContinuousArbitrageStrategy,
+  snapshot: ContinuousArbitrageSnapshot,
+) {
+  return (
+    strategy.active &&
+    BigInt(strategy.remainingVolumeRaw) > 0n &&
+    (strategy.validUntil === 0 || strategy.validUntil > snapshot.readTimestamp)
+  );
 }
 
 export function MarketArbitrageHistory({
   market,
-  latestExecution,
-  refreshSignal,
   watchReason,
   activeQuote,
 }: {
   market: VerifiedMarket;
-  latestExecution: ReserveArbitrageExecution | null;
-  refreshSignal: number;
   watchReason?: string;
   activeQuote?: DirectArbitrageExecutionQuote | null;
 }) {
   const wallet = useWallet();
-  const [snapshot, setSnapshot] = useState<ContinuousArbitrageSnapshot | null>(null);
+  const snapshotState = useContinuousArbitrageSnapshot(wallet.address);
+  const snapshot = snapshotState.snapshot;
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [visibleExecutions, setVisibleExecutions] = useState(5);
 
-  const refresh = useCallback(async () => {
-    if (!wallet.address) {
-      setSnapshot(null);
-      return;
-    }
-    setSnapshot(await readContinuousArbitrageSnapshot(wallet.address));
-  }, [wallet.address]);
-
-  useEffect(() => {
-    let active = true;
-    const timeout = window.setTimeout(() => {
-      refresh().catch((reason) => {
-        if (active) setError(compactError(reason, "Could not read arbitrage."));
-      });
-    }, 0);
-    return () => {
-      active = false;
-      window.clearTimeout(timeout);
-    };
-  }, [latestExecution, refresh, refreshSignal]);
-
-  useEffect(() => {
-    if (!wallet.address) return;
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") {
-        refresh().catch((reason) => setError(compactError(reason, "Could not read arbitrage.")));
-      }
-    };
-    const interval = window.setInterval(refreshWhenVisible, 30_000);
-    window.addEventListener("focus", refreshWhenVisible);
-    document.addEventListener("visibilitychange", refreshWhenVisible);
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener("focus", refreshWhenVisible);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
-    };
-  }, [refresh, wallet.address]);
-
-  const marketStrategies = useMemo(() => snapshot?.strategies.filter(
-    (strategy) => strategy.hToken.toLowerCase() === market.token.toLowerCase(),
-  ) ?? [], [market.token, snapshot?.strategies]);
-  const strategyIds = useMemo(() => new Set(marketStrategies.map((strategy) => strategy.id)), [marketStrategies]);
-  const marketExecutions = useMemo(() => snapshot?.executions.filter(
-    (execution) => strategyIds.has(execution.strategyId),
-  ) ?? [], [snapshot?.executions, strategyIds]);
-  const activeStrategy = useMemo(() => snapshot
-    ? marketStrategies.find((strategy) => isLive(strategy, snapshot)) ?? null
-    : null, [marketStrategies, snapshot]);
-  const activeExecutions = useMemo(() => marketExecutions.filter(
-    (execution) => execution.strategyId === activeStrategy?.id,
-  ), [activeStrategy?.id, marketExecutions]);
-  const walletProfitRaw = useCallback((execution: ContinuousArbitrageExecution) => (
-    BigInt(execution.ownerProfitReserveRaw) + (
-      wallet.address && execution.executor.toLowerCase() === wallet.address.toLowerCase()
+  const marketStrategies = useMemo(
+    () =>
+      snapshot?.strategies.filter(
+        (strategy) =>
+          strategy.hToken.toLowerCase() === market.token.toLowerCase(),
+      ) ?? [],
+    [market.token, snapshot?.strategies],
+  );
+  const strategyIds = useMemo(
+    () => new Set(marketStrategies.map((strategy) => strategy.id)),
+    [marketStrategies],
+  );
+  const marketExecutions = useMemo(
+    () =>
+      snapshot?.executions.filter((execution) =>
+        strategyIds.has(execution.strategyId),
+      ) ?? [],
+    [snapshot?.executions, strategyIds],
+  );
+  const activeStrategy = useMemo(
+    () =>
+      snapshot
+        ? (marketStrategies.find((strategy) => isLive(strategy, snapshot)) ??
+          null)
+        : null,
+    [marketStrategies, snapshot],
+  );
+  const activeExecutions = useMemo(
+    () =>
+      marketExecutions.filter(
+        (execution) => execution.strategyId === activeStrategy?.id,
+      ),
+    [activeStrategy?.id, marketExecutions],
+  );
+  const walletProfitRaw = useCallback(
+    (execution: ContinuousArbitrageExecution) =>
+      BigInt(execution.ownerProfitReserveRaw) +
+      (wallet.address &&
+      execution.executor.toLowerCase() === wallet.address.toLowerCase()
         ? BigInt(execution.executorRewardReserveRaw)
-        : 0n
-    )
-  ), [wallet.address]);
+        : 0n),
+    [wallet.address],
+  );
   const activePnlRaw = activeExecutions.reduce(
     (total, execution) => total + walletProfitRaw(execution),
     0n,
   );
-  const activeStatus = watchReason === "Gas too high." || watchReason === "Waiting for gas."
-    ? "Gas wait"
-    : "Watching";
+  const activeStatus =
+    watchReason === "Gas too high." || watchReason === "Waiting for gas."
+      ? "Gas wait"
+      : "Watching";
 
   async function stop(strategy: ContinuousArbitrageStrategy) {
     if (!wallet.address || !snapshot?.executor) return;
@@ -132,8 +122,11 @@ export function MarketArbitrageHistory({
         args: [BigInt(strategy.id)],
       });
       const stopHash = await walletClient.writeContract(stopRequest.request);
-      const stopReceipt = await publicClient.waitForTransactionReceipt({ hash: stopHash });
-      if (stopReceipt.status !== "success") throw new Error("Stop did not confirm.");
+      const stopReceipt = await publicClient.waitForTransactionReceipt({
+        hash: stopHash,
+      });
+      if (stopReceipt.status !== "success")
+        throw new Error("Stop did not confirm.");
       const revokeRequest = await publicClient.simulateContract({
         account: wallet.address,
         address: strategy.reserveToken,
@@ -141,10 +134,17 @@ export function MarketArbitrageHistory({
         functionName: "approve",
         args: [snapshot.executor, 0n],
       });
-      const revokeHash = await walletClient.writeContract(revokeRequest.request);
-      const revokeReceipt = await publicClient.waitForTransactionReceipt({ hash: revokeHash });
-      if (revokeReceipt.status !== "success") throw new Error("Stopped, but the remaining permission was not removed.");
-      await refresh();
+      const revokeHash = await walletClient.writeContract(
+        revokeRequest.request,
+      );
+      const revokeReceipt = await publicClient.waitForTransactionReceipt({
+        hash: revokeHash,
+      });
+      if (revokeReceipt.status !== "success")
+        throw new Error(
+          "Stopped, but the remaining permission was not removed.",
+        );
+      await refreshContinuousArbitrageSnapshot(wallet.address);
     } catch (reason) {
       setError(compactError(reason, "Could not stop arbitrage."));
     } finally {
@@ -156,7 +156,10 @@ export function MarketArbitrageHistory({
   const hasMoreExecutions = marketExecutions.length > recentExecutions.length;
 
   return (
-    <section className="market-position-history" aria-label={`${market.symbol} arbitrage position history`}>
+    <section
+      className="market-position-history"
+      aria-label={`${market.symbol} arbitrage position history`}
+    >
       <div className="market-position-head">
         <div>
           <span className="kicker">3. Position history</span>
@@ -178,49 +181,139 @@ export function MarketArbitrageHistory({
         {activeStrategy && snapshot && (
           <article>
             <div className="position-market">
-              <Image src={tokenLogoUrl(market.token, CHAINS.base.id)} alt="" width={34} height={34} unoptimized />
-              <span><strong>Active</strong><small>#{activeStrategy.id}</small></span>
+              <Image
+                src={tokenLogoUrl(market.token, CHAINS.base.id)}
+                alt=""
+                width={34}
+                height={34}
+                unoptimized
+              />
+              <span>
+                <strong>Active</strong>
+                <small>#{activeStrategy.id}</small>
+              </span>
             </div>
-            <strong>{tokenAmount(activeStrategy.maxReservePerExecutionRaw, market.reserveDecimals)} {market.reserveSymbol}</strong>
-            <strong>{tokenAmount(activeStrategy.remainingVolumeRaw, market.reserveDecimals)} {market.reserveSymbol}</strong>
+            <strong>
+              {tokenAmount(
+                activeStrategy.maxReservePerExecutionRaw,
+                market.reserveDecimals,
+              )}{" "}
+              {market.reserveSymbol}
+            </strong>
+            <strong>
+              {tokenAmount(
+                activeStrategy.remainingVolumeRaw,
+                market.reserveDecimals,
+              )}{" "}
+              {market.reserveSymbol}
+            </strong>
             <strong>—</strong>
-            <strong className="positive">+{tokenAmount(activePnlRaw.toString(), market.reserveDecimals)} {market.reserveSymbol}</strong>
+            <strong className="positive">
+              +{tokenAmount(activePnlRaw.toString(), market.reserveDecimals)}{" "}
+              {market.reserveSymbol}
+            </strong>
             <strong>{activeStrategy.executionCount}</strong>
-            <span className="position-status"><strong>{activeStatus}</strong><ArbitrageWatchHelp reason={watchReason ?? ""} quote={activeQuote ?? null} reserveSymbol={market.reserveSymbol} reserveDecimals={market.reserveDecimals} /></span>
+            <span className="position-status">
+              <strong>{activeStatus}</strong>
+              <ArbitrageWatchHelp
+                reason={watchReason ?? ""}
+                quote={activeQuote ?? null}
+                reserveSymbol={market.reserveSymbol}
+                reserveDecimals={market.reserveDecimals}
+              />
+            </span>
             <div className="position-actions">
-              <button disabled={Boolean(busy)} onClick={() => void stop(activeStrategy)} type="button">
-                {busy === activeStrategy.id ? <LoaderCircle className="spin" /> : <Pause />} Stop
+              <button
+                disabled={Boolean(busy)}
+                onClick={() => void stop(activeStrategy)}
+                type="button"
+              >
+                {busy === activeStrategy.id ? (
+                  <LoaderCircle className="spin" />
+                ) : (
+                  <Pause />
+                )}{" "}
+                Stop
               </button>
             </div>
           </article>
         )}
 
         {recentExecutions.map((execution: ContinuousArbitrageExecution) => (
-          <a href={`${CHAINS.base.explorerUrl}/tx/${execution.transactionHash}`} target="_blank" rel="noreferrer" key={`${execution.transactionHash}-${execution.strategyId}`}>
+          <a
+            href={`${CHAINS.base.explorerUrl}/tx/${execution.transactionHash}`}
+            target="_blank"
+            rel="noreferrer"
+            key={`${execution.transactionHash}-${execution.strategyId}`}
+          >
             <div className="position-market">
-              <Image src={tokenLogoUrl(market.token, CHAINS.base.id)} alt="" width={34} height={34} unoptimized />
-              <span><strong>Run</strong><small>{execution.direction}</small></span>
+              <Image
+                src={tokenLogoUrl(market.token, CHAINS.base.id)}
+                alt=""
+                width={34}
+                height={34}
+                unoptimized
+              />
+              <span>
+                <strong>Run</strong>
+                <small>{execution.direction}</small>
+              </span>
             </div>
-            <strong>{tokenAmount(execution.amountInReserveRaw, market.reserveDecimals)} {market.reserveSymbol}</strong>
+            <strong>
+              {tokenAmount(
+                execution.amountInReserveRaw,
+                market.reserveDecimals,
+              )}{" "}
+              {market.reserveSymbol}
+            </strong>
             <strong>—</strong>
-            <strong>{tokenAmount(execution.amountReturnedReserveRaw, market.reserveDecimals)} {market.reserveSymbol}</strong>
-            <strong className="positive">+{tokenAmount(walletProfitRaw(execution).toString(), market.reserveDecimals)} {market.reserveSymbol}</strong>
+            <strong>
+              {tokenAmount(
+                execution.amountReturnedReserveRaw,
+                market.reserveDecimals,
+              )}{" "}
+              {market.reserveSymbol}
+            </strong>
+            <strong className="positive">
+              +
+              {tokenAmount(
+                walletProfitRaw(execution).toString(),
+                market.reserveDecimals,
+              )}{" "}
+              {market.reserveSymbol}
+            </strong>
             <strong>{execution.executionCount}</strong>
             <strong>Executed</strong>
-            <span className="position-actions"><ExternalLink /></span>
+            <span className="position-actions">
+              <ExternalLink />
+            </span>
           </a>
         ))}
 
-        {!wallet.address && <div className="market-position-empty"><span>Connect wallet</span></div>}
-        {wallet.address && !activeStrategy && recentExecutions.length === 0 && <div className="market-position-empty"><span>No positions</span></div>}
+        {!wallet.address && (
+          <div className="market-position-empty">
+            <span>Connect wallet</span>
+          </div>
+        )}
+        {wallet.address && !activeStrategy && recentExecutions.length === 0 && (
+          <div className="market-position-empty">
+            <span>No positions</span>
+          </div>
+        )}
       </div>
 
       {hasMoreExecutions && (
-        <button className="market-position-more" onClick={() => setVisibleExecutions((value) => value + 5)} type="button">
+        <button
+          className="market-position-more"
+          onClick={() => setVisibleExecutions((value) => value + 5)}
+          type="button"
+        >
           Show more
         </button>
       )}
-      {error && <p className="market-position-error">{error}</p>}
+      {(error || snapshotState.error) && (
+        <p className="market-position-error">{error || snapshotState.error}</p>
+      )}
     </section>
   );
 }

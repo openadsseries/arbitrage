@@ -17,8 +17,11 @@ Do not include live private keys, seed phrases or unrestricted API credentials.
 ## Secrets
 
 - `.env.local` is ignored and must never be committed.
+- `ARBITRAGE_RELAYER_PRIVATE_KEY` belongs only in the web deployment and must use a dedicated low-balance gas account.
 - `ARBITRAGE_KEEPER_PRIVATE_KEY` belongs only on the persistent keeper host.
-- Use a dedicated keeper account funded only for gas.
+- Never reuse the relay and keeper keys.
+- Keep `ARBITRAGE_RELAY_DAILY_GAS_WEI` low enough to bound one deployment instance's daily gas use.
+- Use dedicated accounts funded only for gas.
 - Uniswap and RPC credentials remain server-side.
 - Rotate any credential immediately if it appears in logs, screenshots, commits or support messages.
 

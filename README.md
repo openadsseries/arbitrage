@@ -71,7 +71,7 @@ The current immutable fee policy is:
 - Shows active arbitrage routes, realized Reserve Token profit and execution history.
 - Preserves earlier one-time V2 permissions so users can review and revoke them.
 - Reads verified deployment bytecode and contract boundaries from the selected network.
-- Keeps every wallet signature explicit.
+- Keeps user approvals explicit and bounded.
 
 ## Architecture
 
@@ -83,37 +83,39 @@ flowchart TB
     M[Mint Club contracts]
     X[Uniswap routes]
     E[Immutable V3 executor]
-    K[Persistent permissionless keeper]
+    R[Gas-only browser relay]
 
     U <-->|Read and prepare| V
     V <-->|Market history and attributed prices| G
     U <-->|Create, trade, approve, stop| M
     V <-->|Executable route quotes| X
     U -->|Bounded Reserve Token permission| E
-    K -->|Check and submit profitable routes| E
+    U -->|Watch while open| R
+    R -->|Simulate and submit profitable routes| E
     E <-->|Atomic route| M
     E <-->|Atomic route| X
     E -->|Principal plus protected profit| U
 ```
 
-The web application and keeper are intentionally separate:
+The web application and relay are intentionally bounded:
 
 - **Vercel** serves the interface and request-response APIs.
-- **Keeper** is an always-on, permissionless process and must run on a persistent worker, VM or container.
+- **Browser relay** runs only while a user tab is watching, uses a separate low-balance key and has request and daily gas limits.
+- **Persistent keeper** is optional and must run on a separate worker, VM or container with a different key.
 - **Executor contract** enforces the entered Reserve Token amount, protected profit and stop state.
 
-The keeper does not custody funds and has no privileged contract role. It only submits an execution that the immutable contract independently validates.
+The relay and optional keeper do not custody funds and have no privileged contract role. They only submit executions that the immutable contract independently validates.
 
 ## Data sources and source of truth
 
-| Information | Source of truth |
-| --- | --- |
-| Token metadata, balances, supply and backing | Selected network contracts |
-| Hyped Token creation and return quotes | Mint Club Bond contract and SDK |
-| OG and Hyped Token routes | Uniswap Trading API / Base Onchain Router |
-| Historical market chart and attributed USD price | GeckoTerminal |
+| Information                                            | Source of truth                               |
+| ------------------------------------------------------ | --------------------------------------------- |
+| Token metadata, balances, supply and backing           | Selected network contracts                    |
+| Hyped Token creation and return quotes                 | Mint Club Bond contract and SDK               |
+| OG and Hyped Token routes                              | Uniswap Trading API / Base Onchain Router     |
+| Historical market chart and attributed USD price       | GeckoTerminal                                 |
 | Active strategy, limits and realized execution history | `HypedArbitrageExecutorV3` events and storage |
-| Wallet permission | Reserve Token allowance onchain |
+| Wallet permission                                      | Reserve Token allowance onchain               |
 
 Public historical data may be cached. Wallet balances, permissions, strategy state and transaction preparation are never shared-cacheable.
 
@@ -165,6 +167,7 @@ ARBITRAGE_EXECUTOR_V3_DEPLOYMENT_BLOCK=50422622
 BASE_RPC_URL=
 ROBINHOOD_RPC_URL=
 ARBITRAGE_RELAYER_PRIVATE_KEY=
+ARBITRAGE_RELAY_DAILY_GAS_WEI=1000000000000000
 ```
 
 `UNISWAP_API_KEY` and RPC credentials are server-only. `UNISWAP_FEE_RECIPIENT` must be a reviewed project-controlled address.
@@ -189,6 +192,7 @@ NEXT_PUBLIC_ARBITRAGE_EXECUTOR_V3=0xbB7AF71818fD1a269f21D0b5E4d8F7CF5401Ac3C
 ```
 
 Keep the relay wallet funded only for Base gas. The relay cannot move funds beyond the user-approved strategy limits.
+The default per-instance relay ceiling is `0.001 ETH` per UTC day. Set a lower production value after measuring Base execution costs.
 
 ### Persistent keeper only
 
@@ -234,7 +238,7 @@ forge fmt --check
 forge test
 ```
 
-The current release passes 24 application tests and 35 contract tests, plus Base fork coverage for the existing execution paths.
+The current release passes 25 application tests and 36 contract tests, plus Base fork coverage for the existing execution paths.
 
 ## Repository map
 
@@ -257,7 +261,7 @@ Important boundaries:
 
 - A visible historical price difference is not guaranteed profit.
 - Every execution depends on current liquidity, price impact, fees and Base gas.
-- The keeper submits transactions only when its simulation is profitable and gas-covered.
+- The relay or optional keeper submits transactions only when its simulation is profitable and gas-covered.
 - The contract performs the final atomic minimum-return enforcement.
 - Token behavior can still introduce external risk; unsupported or non-standard assets must not bypass creation checks.
 - This repository is software, not a promise of returns or financial advice.

@@ -82,6 +82,28 @@ contract HypedArbitrageExecutorV3Test {
         );
     }
 
+    function testBuyThenRedeemSettlesPrincipalAndProfitInReserve() public {
+        router.setRate(address(reserve), address(weth), 12, 10);
+        router.setRate(address(weth), address(hyped), 11, 10);
+        reserve.approve(address(executor), 100 ether);
+        uint256 strategyId = _start(100 ether, 100 ether, 1 ether, 0);
+
+        keeper.execute(
+            executor,
+            strategyId,
+            HypedArbitrageExecutorV3.Direction.BuyThenRedeem,
+            _params(100 ether, 0, 120 ether, 132 ether, 132 ether, 132 ether)
+        );
+
+        _assertEq(reserve.balanceOf(address(this)), 1_025.6 ether, "owner reserve return");
+        _assertEq(reserve.balanceOf(address(keeper)), 6.4 ether, "keeper reserve reward");
+        _assertEq(reserve.balanceOf(address(executor)), 0, "executor reserve retained");
+        _assertEq(weth.balanceOf(address(executor)), 0, "executor WETH retained");
+        _assertEq(hyped.balanceOf(address(executor)), 0, "executor h-token retained");
+        _assertEq(hyped.allowance(address(executor), address(bond)), 0, "bond h-token allowance");
+        _assertStrategy(strategyId, false, 1, 0);
+    }
+
     function testNoExpiryRemainsActiveUntilOwnerStops() public {
         _setProfitableMintRoute();
         reserve.approve(address(executor), 300 ether);

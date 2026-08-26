@@ -26,9 +26,7 @@ const FACTORY_ABI = parseAbi([
   "function getPool(address tokenA, address tokenB, uint24 fee) view returns (address pool)",
 ]);
 
-const POOL_ABI = parseAbi([
-  "function liquidity() view returns (uint128)",
-]);
+const POOL_ABI = parseAbi(["function liquidity() view returns (uint128)"]);
 
 const QUOTER_ABI = parseAbi([
   "function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) returns (uint256 amountOut,uint160 sqrtPriceX96After,uint32 initializedTicksCrossed,uint256 gasEstimate)",
@@ -82,7 +80,9 @@ async function quoteExactOutput(
     address: CHAINS[chain].quoter,
     abi: QUOTER_ABI,
     functionName: "quoteExactOutputSingle",
-    args: [{ tokenIn, tokenOut, amount: amountOut, fee, sqrtPriceLimitX96: 0n }],
+    args: [
+      { tokenIn, tokenOut, amount: amountOut, fee, sqrtPriceLimitX96: 0n },
+    ],
   });
   return simulation.result[0];
 }
@@ -90,7 +90,9 @@ async function quoteExactOutput(
 async function findActivePool(chain: ChainKey, token: Address) {
   const capability = CHAINS[chain];
   const client = network(chain).getPublicClient();
-  const candidates = capability.quoteAssets.flatMap((quote) => FEE_TIERS.map((fee) => ({ quote, fee })));
+  const candidates = capability.quoteAssets.flatMap((quote) =>
+    FEE_TIERS.map((fee) => ({ quote, fee })),
+  );
   const pools = await client.multicall({
     allowFailure: true,
     contracts: candidates.map(({ quote, fee }) => ({
@@ -100,18 +102,37 @@ async function findActivePool(chain: ChainKey, token: Address) {
       args: [token, quote.address, fee] as const,
     })),
   });
-  const deployed = pools.flatMap((result, index) => result.status === "success" && result.result !== zeroAddress
-    ? [{ pool: getAddress(result.result), ...candidates[index] }]
-    : []);
+  const deployed = pools.flatMap((result, index) =>
+    result.status === "success" && result.result !== zeroAddress
+      ? [{ pool: getAddress(result.result), ...candidates[index] }]
+      : [],
+  );
   const liquidities = await client.multicall({
     allowFailure: true,
-    contracts: deployed.map(({ pool }) => ({ address: pool, abi: POOL_ABI, functionName: "liquidity" as const })),
+    contracts: deployed.map(({ pool }) => ({
+      address: pool,
+      abi: POOL_ABI,
+      functionName: "liquidity" as const,
+    })),
   });
-  const best = deployed.flatMap((candidate, index) => {
-    const result = liquidities[index];
-    return result.status === "success" && result.result > 0n ? [{ ...candidate, liquidity: result.result }] : [];
-  }).sort((left, right) => left.liquidity > right.liquidity ? -1 : left.liquidity < right.liquidity ? 1 : 0)[0];
-  if (!best) throw new Error("No active h-token liquidity was found on a supported quote asset.");
+  const best = deployed
+    .flatMap((candidate, index) => {
+      const result = liquidities[index];
+      return result.status === "success" && result.result > 0n
+        ? [{ ...candidate, liquidity: result.result }]
+        : [];
+    })
+    .sort((left, right) =>
+      left.liquidity > right.liquidity
+        ? -1
+        : left.liquidity < right.liquidity
+          ? 1
+          : 0,
+    )[0];
+  if (!best)
+    throw new Error(
+      "No active h-token liquidity was found on a supported quote asset.",
+    );
   return best;
 }
 
@@ -122,16 +143,36 @@ async function findSourcePool(
 ) {
   if (isAddressEqual(reserveToken, quoteToken)) return { pool: null, fee: 0 };
   const client = network(chain).getPublicClient();
-  const results = await Promise.all(FEE_TIERS.map(async (fee) => {
-    const pool = await client.readContract({ address: CHAINS[chain].uniswapV3Factory, abi: FACTORY_ABI, functionName: "getPool", args: [reserveToken, quoteToken, fee] });
-    if (pool === zeroAddress) return null;
-    const liquidity = await client.readContract({ address: pool, abi: POOL_ABI, functionName: "liquidity" });
-    return liquidity > 0n ? { pool: getAddress(pool), fee, liquidity } : null;
-  }));
-  const best = results.filter((result): result is NonNullable<typeof result> => result !== null)
-    .sort((left, right) => left.liquidity > right.liquidity ? -1 : left.liquidity < right.liquidity ? 1 : 0)[0];
+  const results = await Promise.all(
+    FEE_TIERS.map(async (fee) => {
+      const pool = await client.readContract({
+        address: CHAINS[chain].uniswapV3Factory,
+        abi: FACTORY_ABI,
+        functionName: "getPool",
+        args: [reserveToken, quoteToken, fee],
+      });
+      if (pool === zeroAddress) return null;
+      const liquidity = await client.readContract({
+        address: pool,
+        abi: POOL_ABI,
+        functionName: "liquidity",
+      });
+      return liquidity > 0n ? { pool: getAddress(pool), fee, liquidity } : null;
+    }),
+  );
+  const best = results
+    .filter((result): result is NonNullable<typeof result> => result !== null)
+    .sort((left, right) =>
+      left.liquidity > right.liquidity
+        ? -1
+        : left.liquidity < right.liquidity
+          ? 1
+          : 0,
+    )[0];
   if (best) return { pool: best.pool, fee: best.fee };
-  throw new Error("The h-token pool exists, but no matching OG market was found against the same quote asset.");
+  throw new Error(
+    "The h-token pool exists, but no matching OG market was found against the same quote asset.",
+  );
 }
 
 async function findExecutableQuote(
@@ -208,24 +249,31 @@ export async function prepareLaunchLiquidity({
   hypedAmount: bigint;
   reserveReference?: bigint;
 }): Promise<LiquidityPreparation> {
-  if (hypedAmount <= 0n) throw new Error("Enter an h-token amount greater than zero.");
-  if (owner === zeroAddress) throw new Error("Connect a wallet before preparing liquidity.");
+  if (hypedAmount <= 0n)
+    throw new Error("Enter an h-token amount greater than zero.");
+  if (owner === zeroAddress)
+    throw new Error("Connect a wallet before preparing liquidity.");
   if (chain !== "base") {
-    throw new Error("Connected pool creation is enabled on Base first while Robinhood remains read-only beta.");
+    throw new Error(
+      "Connected pool creation is enabled on Base first while Robinhood remains read-only beta.",
+    );
   }
 
   const capability = CHAINS[chain];
   const client = network(chain).getPublicClient();
   const hToken = network(chain).token(hypedToken);
-  if (!(await hToken.exists())) throw new Error("The h-token was not found in Mint Club.");
+  if (!(await hToken.exists()))
+    throw new Error("The h-token was not found in Mint Club.");
 
-  const [hypedSymbol, hypedDecimals, bond, estimation, readBlock] = await Promise.all([
-    hToken.getSymbol(),
-    hToken.getDecimals(),
-    hToken.getTokenBond(),
-    hToken.getBuyEstimation(hypedAmount),
-    client.getBlockNumber(),
-  ]);
+  const [hypedSymbol, hypedDecimals, bond, estimation, redemption, readBlock] =
+    await Promise.all([
+      hToken.getSymbol(),
+      hToken.getDecimals(),
+      hToken.getTokenBond(),
+      hToken.getBuyEstimation(hypedAmount),
+      hToken.getSellEstimation(hypedAmount).catch(() => null),
+      client.getBlockNumber(),
+    ]);
   const reserveToken = getAddress(bond.reserveToken);
   const reserve = network(chain).token(reserveToken);
   const [reserveSymbol, reserveDecimals] = await Promise.all([
@@ -233,16 +281,38 @@ export async function prepareLaunchLiquidity({
     reserve.getDecimals(),
   ]);
 
+  if (reserveReference !== undefined) {
+    const lowerBound = redemption ? (redemption[0] * 99n) / 100n : 0n;
+    const upperBound = (estimation[0] * 101n) / 100n + 1n;
+    if (reserveReference < lowerBound || reserveReference > upperBound) {
+      throw new Error(
+        "The saved reserve amount no longer matches the Mint Club curve. Check the mint again.",
+      );
+    }
+  }
   const reserveRequired = reserveReference ?? estimation[0];
-  if (reserveRequired <= 0n) throw new Error("Mint Club returned a zero reserve requirement.");
-  const directMarketCheck = await discoverDirectUniswapMarket(chain, hypedToken, hypedDecimals);
+  if (reserveRequired <= 0n)
+    throw new Error("Mint Club returned a zero reserve requirement.");
+  const directMarketCheck = await discoverDirectUniswapMarket(
+    chain,
+    hypedToken,
+    hypedDecimals,
+  );
   if (directMarketCheck.status === "unavailable") {
-    throw new Error("Existing Uniswap liquidity could not be verified. Try again before creating a pool.");
+    throw new Error(
+      "Existing Uniswap liquidity could not be verified. Try again before creating a pool.",
+    );
   }
   if (directMarketCheck.market) {
-    throw new Error(`${hypedSymbol} already has an active Uniswap ${directMarketCheck.market.protocol} ${directMarketCheck.market.quoteSymbol} market. Use the existing market instead of creating another pool.`);
+    throw new Error(
+      `${hypedSymbol} already has an active Uniswap ${directMarketCheck.market.protocol} ${directMarketCheck.market.quoteSymbol} market. Use the existing market instead of creating another pool.`,
+    );
   }
-  const directQuote = await findExecutableQuote(chain, reserveToken, reserveRequired);
+  const directQuote = await findExecutableQuote(
+    chain,
+    reserveToken,
+    reserveRequired,
+  );
 
   const existingPool = await client.readContract({
     address: capability.uniswapV3Factory,
@@ -268,11 +338,22 @@ export async function prepareLaunchLiquidity({
     directQuote.quoteDecimals,
     directQuote.quoteSymbol,
   );
-  const token0 = hSdkToken.sortsBefore(quoteSdkToken) ? hSdkToken : quoteSdkToken;
-  const token1 = hSdkToken.sortsBefore(quoteSdkToken) ? quoteSdkToken : hSdkToken;
-  const amount0 = token0.equals(hSdkToken) ? hypedAmount : directQuote.amountOut;
-  const amount1 = token1.equals(hSdkToken) ? hypedAmount : directQuote.amountOut;
-  const sqrtPriceX96 = encodeSqrtRatioX96(amount1.toString(), amount0.toString());
+  const token0 = hSdkToken.sortsBefore(quoteSdkToken)
+    ? hSdkToken
+    : quoteSdkToken;
+  const token1 = hSdkToken.sortsBefore(quoteSdkToken)
+    ? quoteSdkToken
+    : hSdkToken;
+  const amount0 = token0.equals(hSdkToken)
+    ? hypedAmount
+    : directQuote.amountOut;
+  const amount1 = token1.equals(hSdkToken)
+    ? hypedAmount
+    : directQuote.amountOut;
+  const sqrtPriceX96 = encodeSqrtRatioX96(
+    amount1.toString(),
+    amount0.toString(),
+  );
   const currentTick = TickMath.getTickAtSqrtRatio(sqrtPriceX96);
   const poolModel = new Pool(
     token0,
@@ -304,7 +385,13 @@ export async function prepareLaunchLiquidity({
   const positionAmountQuote = token0.equals(quoteSdkToken)
     ? BigInt(mintAmounts.amount0.toString())
     : BigInt(mintAmounts.amount1.toString());
-  const pool = Pool.getAddress(token0, token1, NEW_POOL_FEE, undefined, capability.uniswapV3Factory);
+  const pool = Pool.getAddress(
+    token0,
+    token1,
+    NEW_POOL_FEE,
+    undefined,
+    capability.uniswapV3Factory,
+  );
 
   return {
     chain,
@@ -319,7 +406,7 @@ export async function prepareLaunchLiquidity({
     reserveDecimals,
     hypedAmountRaw: hypedAmount.toString(),
     reserveRequiredRaw: reserveRequired.toString(),
-    maxReserveAmountRaw: (estimation[0] * 101n / 100n + 1n).toString(),
+    maxReserveAmountRaw: ((estimation[0] * 101n) / 100n + 1n).toString(),
     quoteToken: directQuote.quoteToken,
     quoteSymbol: directQuote.quoteSymbol,
     quoteDecimals: directQuote.quoteDecimals,
@@ -345,11 +432,21 @@ export async function previewArbitrageRoutes({
   hypedToken: Address;
   hypedAmount: bigint;
 }): Promise<ArbitragePreview> {
-  if (hypedAmount <= 0n) throw new Error("Enter an h-token amount greater than zero.");
+  if (hypedAmount <= 0n)
+    throw new Error("Enter an h-token amount greater than zero.");
   const client = network(chain).getPublicClient();
   const hToken = network(chain).token(hypedToken);
-  if (!(await hToken.exists())) throw new Error("The h-token was not found in Mint Club.");
-  const [hypedSymbol, hypedDecimals, bond, mintEstimation, redeemEstimation, readBlock, hPool] = await Promise.all([
+  if (!(await hToken.exists()))
+    throw new Error("The h-token was not found in Mint Club.");
+  const [
+    hypedSymbol,
+    hypedDecimals,
+    bond,
+    mintEstimation,
+    redeemEstimation,
+    readBlock,
+    hPool,
+  ] = await Promise.all([
     hToken.getSymbol(),
     hToken.getDecimals(),
     hToken.getTokenBond(),
@@ -368,12 +465,36 @@ export async function previewArbitrageRoutes({
   const reserveForMint = mintEstimation[0];
   const reserveFromRedeem = redeemEstimation[0];
   const mintQuoteIn = sourcePool.pool
-    ? await quoteExactOutput(chain, hPool.quote.address, reserveToken, reserveForMint, sourcePool.fee)
+    ? await quoteExactOutput(
+        chain,
+        hPool.quote.address,
+        reserveToken,
+        reserveForMint,
+        sourcePool.fee,
+      )
     : reserveForMint;
-  const mintQuoteOut = await quoteExactInput(chain, hypedToken, hPool.quote.address, hypedAmount, hPool.fee);
-  const redeemQuoteIn = await quoteExactOutput(chain, hPool.quote.address, hypedToken, hypedAmount, hPool.fee);
+  const mintQuoteOut = await quoteExactInput(
+    chain,
+    hypedToken,
+    hPool.quote.address,
+    hypedAmount,
+    hPool.fee,
+  );
+  const redeemQuoteIn = await quoteExactOutput(
+    chain,
+    hPool.quote.address,
+    hypedToken,
+    hypedAmount,
+    hPool.fee,
+  );
   const redeemQuoteOut = sourcePool.pool
-    ? await quoteExactInput(chain, reserveToken, hPool.quote.address, reserveFromRedeem, sourcePool.fee)
+    ? await quoteExactInput(
+        chain,
+        reserveToken,
+        hPool.quote.address,
+        reserveFromRedeem,
+        sourcePool.fee,
+      )
     : reserveFromRedeem;
   const mintDifference = mintQuoteOut - mintQuoteIn;
   const redeemDifference = redeemQuoteOut - redeemQuoteIn;

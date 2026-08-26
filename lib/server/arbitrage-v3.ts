@@ -1,6 +1,7 @@
 import "server-only";
 
 import { mintclub } from "@mint.club/v2-sdk";
+import { unstable_cache } from "next/cache";
 import { getAddress, zeroAddress, type Address } from "viem";
 import {
   ARBITRAGE_EXECUTOR_V3_ABI,
@@ -11,7 +12,26 @@ import {
   type ContinuousArbitrageStrategy,
 } from "@/lib/arbitrage";
 
-const LOG_CHUNK = 50_000n;
+const LOG_CHUNK = 10_000n;
+const FINALITY_DEPTH = 20n;
+
+type StartedEvent = { strategyId: string };
+type ExecutionEvent = {
+  strategyId: string;
+  transactionHash: `0x${string}`;
+  blockNumber: string;
+  executor: Address;
+  direction: "Mint then sell" | "Buy then redeem";
+  reserveToken: Address;
+  amountInReserveRaw: string;
+  amountReturnedReserveRaw: string;
+  grossProfitReserveRaw: string;
+  protocolFeeReserveRaw: string;
+  executorRewardReserveRaw: string;
+  ownerProfitReserveRaw: string;
+  remainingVolumeRaw: string;
+  executionCount: string;
+};
 
 function blockRanges(fromBlock: bigint, toBlock: bigint) {
   const ranges: { fromBlock: bigint; toBlock: bigint }[] = [];
@@ -20,6 +40,89 @@ function blockRanges(fromBlock: bigint, toBlock: bigint) {
     ranges.push({ fromBlock: start, toBlock: end > toBlock ? toBlock : end });
   }
   return ranges;
+}
+
+async function readEventRange(
+  owner: string,
+  fromBlock: string,
+  toBlock: string,
+) {
+  const client = mintclub.network("base").getPublicClient();
+  const wallet = getAddress(owner);
+  const range = { fromBlock: BigInt(fromBlock), toBlock: BigInt(toBlock) };
+  const [started, executed] = await Promise.all([
+    client.getContractEvents({
+      address: getArbitrageExecutorV3("base")!,
+      abi: ARBITRAGE_EXECUTOR_V3_ABI,
+      eventName: "StrategyStarted",
+      args: { owner: wallet },
+      ...range,
+    }),
+    client.getContractEvents({
+      address: getArbitrageExecutorV3("base")!,
+      abi: ARBITRAGE_EXECUTOR_V3_ABI,
+      eventName: "ArbitrageExecuted",
+      args: { owner: wallet },
+      ...range,
+    }),
+  ]);
+  return {
+    started: started.map(
+      (log) =>
+        ({
+          strategyId: (log.args.strategyId ?? 0n).toString(),
+        }) satisfies StartedEvent,
+    ),
+    executions: executed.map(
+      (log) =>
+        ({
+          strategyId: (log.args.strategyId ?? 0n).toString(),
+          transactionHash: log.transactionHash,
+          blockNumber: log.blockNumber.toString(),
+          executor: getAddress(log.args.executor ?? zeroAddress),
+          direction:
+            log.args.direction === 0 ? "Mint then sell" : "Buy then redeem",
+          reserveToken: getAddress(log.args.reserveToken ?? zeroAddress),
+          amountInReserveRaw: (log.args.amountInReserve ?? 0n).toString(),
+          amountReturnedReserveRaw: (
+            log.args.amountReturnedReserve ?? 0n
+          ).toString(),
+          grossProfitReserveRaw: (log.args.grossProfitReserve ?? 0n).toString(),
+          protocolFeeReserveRaw: (log.args.protocolFeeReserve ?? 0n).toString(),
+          executorRewardReserveRaw: (
+            log.args.executorRewardReserve ?? 0n
+          ).toString(),
+          ownerProfitReserveRaw: (log.args.ownerProfitReserve ?? 0n).toString(),
+          remainingVolumeRaw: (log.args.remainingVolume ?? 0n).toString(),
+          executionCount: (log.args.executionCount ?? 0n).toString(),
+        }) satisfies ExecutionEvent,
+    ),
+  };
+}
+
+const readFinalizedEventRange = unstable_cache(
+  readEventRange,
+  ["continuous-arbitrage-v3-events-v1"],
+  { revalidate: false },
+);
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  read: (item: T) => Promise<R>,
+) {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+      while (cursor < items.length) {
+        const index = cursor;
+        cursor += 1;
+        results[index] = await read(items[index]);
+      }
+    }),
+  );
+  return results;
 }
 
 export async function readContinuousArbitrageSnapshot(
@@ -46,88 +149,107 @@ export async function readContinuousArbitrageSnapshot(
     client.getBlockNumber(),
     client.getBytecode({ address: executor }),
   ]);
-  if (!bytecode || bytecode === "0x") throw new Error("The continuous arbitrage executor is not deployed on Base.");
-  if (deploymentBlock > readBlock) throw new Error("The continuous arbitrage executor block is ahead of Base.");
+  if (!bytecode || bytecode === "0x")
+    throw new Error(
+      "The continuous arbitrage executor is not deployed on Base.",
+    );
+  if (deploymentBlock > readBlock)
+    throw new Error(
+      "The continuous arbitrage executor block is ahead of Base.",
+    );
   const ranges = blockRanges(deploymentBlock, readBlock);
+  const finalizedBlock =
+    readBlock > FINALITY_DEPTH ? readBlock - FINALITY_DEPTH : 0n;
 
-  const [startedChunks, executionChunks, protocolFeeBps, executorRewardBps] = await Promise.all([
-    Promise.all(ranges.map((range) => client.getContractEvents({
+  const [eventChunks, protocolFeeBps, executorRewardBps] = await Promise.all([
+    mapWithConcurrency(ranges, 4, (range) => {
+      const reader =
+        range.toBlock <= finalizedBlock
+          ? readFinalizedEventRange
+          : readEventRange;
+      return reader(
+        wallet,
+        range.fromBlock.toString(),
+        range.toBlock.toString(),
+      );
+    }),
+    client.readContract({
       address: executor,
       abi: ARBITRAGE_EXECUTOR_V3_ABI,
-      eventName: "StrategyStarted",
-      args: { owner: wallet },
-      ...range,
-    }))),
-    Promise.all(ranges.map((range) => client.getContractEvents({
+      functionName: "protocolFeeBps",
+    }),
+    client.readContract({
       address: executor,
       abi: ARBITRAGE_EXECUTOR_V3_ABI,
-      eventName: "ArbitrageExecuted",
-      args: { owner: wallet },
-      ...range,
-    }))),
-    client.readContract({ address: executor, abi: ARBITRAGE_EXECUTOR_V3_ABI, functionName: "protocolFeeBps" }),
-    client.readContract({ address: executor, abi: ARBITRAGE_EXECUTOR_V3_ABI, functionName: "executorRewardBps" }),
+      functionName: "executorRewardBps",
+    }),
   ]);
 
-  const started = startedChunks.flat();
+  const started = eventChunks.flatMap((chunk) => chunk.started);
   const strategyReads = await client.multicall({
     allowFailure: false,
     contracts: started.map((log) => ({
       address: executor,
       abi: ARBITRAGE_EXECUTOR_V3_ABI,
       functionName: "strategies" as const,
-      args: [log.args.strategyId ?? 0n] as const,
+      args: [BigInt(log.strategyId)] as const,
     })),
   });
 
-  const strategies = started.map((log, index) => {
-    const [
-      owner,
-      hToken,
-      reserveToken,
-      validUntil,
-      active,
-      executionCount,
-      lastExecutionBlock,
-      maximum,
-      remainingVolume,
-      minimumProfit,
-    ] = strategyReads[index];
-    return {
-      chain: "base",
-      id: (log.args.strategyId ?? 0n).toString(),
-      owner: getAddress(owner),
-      hToken: getAddress(hToken),
-      reserveToken: getAddress(reserveToken),
-      validUntil: Number(validUntil),
-      active,
-      executionCount: executionCount.toString(),
-      lastExecutionBlock: lastExecutionBlock.toString(),
-      maxReservePerExecutionRaw: maximum.toString(),
-      remainingVolumeRaw: remainingVolume.toString(),
-      minProfitReserveRaw: minimumProfit.toString(),
-    } satisfies ContinuousArbitrageStrategy;
-  }).sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? 1 : -1));
+  const strategies = started
+    .map((log, index) => {
+      const [
+        owner,
+        hToken,
+        reserveToken,
+        validUntil,
+        active,
+        executionCount,
+        lastExecutionBlock,
+        maximum,
+        remainingVolume,
+        minimumProfit,
+      ] = strategyReads[index];
+      return {
+        chain: "base",
+        id: log.strategyId,
+        owner: getAddress(owner),
+        hToken: getAddress(hToken),
+        reserveToken: getAddress(reserveToken),
+        validUntil: Number(validUntil),
+        active,
+        executionCount: executionCount.toString(),
+        lastExecutionBlock: lastExecutionBlock.toString(),
+        maxReservePerExecutionRaw: maximum.toString(),
+        remainingVolumeRaw: remainingVolume.toString(),
+        minProfitReserveRaw: minimumProfit.toString(),
+      } satisfies ContinuousArbitrageStrategy;
+    })
+    .sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? 1 : -1));
 
-  const executions = executionChunks.flat().map((log) => ({
-    chain: "base",
-    strategyId: (log.args.strategyId ?? 0n).toString(),
-    transactionHash: log.transactionHash,
-    blockNumber: log.blockNumber.toString(),
-    executor: getAddress(log.args.executor ?? zeroAddress),
-    direction: log.args.direction === 0 ? "Mint then sell" : "Buy then redeem",
-    reserveToken: getAddress(log.args.reserveToken ?? zeroAddress),
-    amountInReserveRaw: (log.args.amountInReserve ?? 0n).toString(),
-    amountReturnedReserveRaw: (log.args.amountReturnedReserve ?? 0n).toString(),
-    grossProfitReserveRaw: (log.args.grossProfitReserve ?? 0n).toString(),
-    protocolFeeReserveRaw: (log.args.protocolFeeReserve ?? 0n).toString(),
-    executorRewardReserveRaw: (log.args.executorRewardReserve ?? 0n).toString(),
-    ownerProfitReserveRaw: (log.args.ownerProfitReserve ?? 0n).toString(),
-    remainingVolumeRaw: (log.args.remainingVolume ?? 0n).toString(),
-    executionCount: (log.args.executionCount ?? 0n).toString(),
-  } satisfies ContinuousArbitrageExecution)).sort((a, b) => (
-    BigInt(a.blockNumber) < BigInt(b.blockNumber) ? 1 : -1
-  ));
+  const executions = eventChunks
+    .flatMap((chunk) => chunk.executions)
+    .map(
+      (log) =>
+        ({
+          chain: "base",
+          strategyId: log.strategyId,
+          transactionHash: log.transactionHash,
+          blockNumber: log.blockNumber,
+          executor: log.executor,
+          direction: log.direction,
+          reserveToken: log.reserveToken,
+          amountInReserveRaw: log.amountInReserveRaw,
+          amountReturnedReserveRaw: log.amountReturnedReserveRaw,
+          grossProfitReserveRaw: log.grossProfitReserveRaw,
+          protocolFeeReserveRaw: log.protocolFeeReserveRaw,
+          executorRewardReserveRaw: log.executorRewardReserveRaw,
+          ownerProfitReserveRaw: log.ownerProfitReserveRaw,
+          remainingVolumeRaw: log.remainingVolumeRaw,
+          executionCount: log.executionCount,
+        }) satisfies ContinuousArbitrageExecution,
+    )
+    .sort((a, b) => (BigInt(a.blockNumber) < BigInt(b.blockNumber) ? 1 : -1));
 
   return {
     configured: true,
