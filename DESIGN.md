@@ -34,7 +34,9 @@
 
 ## Visual hierarchy
 
-- Use pink as an action and state accent, not as the default color of every control.
+- Use restrained green as the live, positive and primary-action accent. Reserve amber and red for waiting and failure states. Neutral surfaces must remain visually dominant.
+- Use a near-black financial workspace, layered charcoal surfaces and quiet green-tinted borders. The interface should feel like a focused market terminal, not a marketing card collection.
+- Structure information as identity, live state, key metrics, chart or table, then action. Prefer dense aligned rows and compact data cells over decorative containers.
 - Prefer spacing and typography over nested cards, borders and badges.
 - Keep primary actions visually dominant and hide supporting explanations behind a refined details control when appropriate.
 - Token and market visuals must use real contract-backed data and real token logos. Never seed mock market or portfolio data.
@@ -67,7 +69,7 @@
 - Connect only real observed OHLCV closes with straight segments. Do not smooth, interpolate or manufacture intermediate market data.
 - Use one visible three-part toggle with equal-width `Arbitrage`, `Trade OG` and `Trade Hyped Token` buttons. Do not hide these destinations in a dropdown or add a redundant `View` label. This single control changes the explanation, chart and action panel together.
 - Do not add a second page-face selector or repeat an OG/Hyped Token toggle inside the content. One visible view control is the complete navigation model for market detail.
-- Use one full-size off-white Arbitrage workspace with a single divider between comparison and action. Do not use a dark container or a full-height pink action field. Pink remains the single primary action and selected-state accent.
+- Use one full-size dark Arbitrage workspace with a single divider between comparison and action. The comparison and action surfaces share one restrained terminal palette; green marks the selected state, live data and primary action.
 - Make task order explicit with `1. Check profit`, `2 · Execute` and `3. Position history`. The current profit state is the primary result, followed by the historical price comparison, the compact arbitrage path and the exact returned Reserve Token amount.
 - Keep the pair header to the token pair and the single three-part view toggle. Remove repeated network, product-proposition, normalization, fee and gas helper sentences from the primary surface; retain necessary disclosures in source links or the existing settings accordions.
 - Align `1. Check profit` with the action panel step label. Keep the live percentage as the only large result in that header.
