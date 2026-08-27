@@ -2,18 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  BarChart3,
-  CirclePlus,
-  Home,
-  Menu,
-  PanelLeftClose,
-  PanelLeftOpen,
-  ShieldCheck,
-  WalletCards,
-  X,
-} from "lucide-react";
-import { useEffect, useState } from "react";
+import { BarChart3, CirclePlus, Home, Menu, ShieldCheck, WalletCards, X } from "lucide-react";
+import { useState } from "react";
 import { Logo } from "@/components/logo";
 import { WalletButton } from "@/components/wallet-button";
 
@@ -35,20 +25,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isMarketDetail = /^\/market\/[^/]+\/[^/]+/.test(pathname);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [railExpanded, setRailExpanded] = useState(false);
-
-  useEffect(() => {
-    function collapseRail(event: KeyboardEvent) {
-      if (event.key === "Escape") setRailExpanded(false);
-    }
-
-    window.addEventListener("keydown", collapseRail);
-    return () => window.removeEventListener("keydown", collapseRail);
-  }, []);
 
   return (
     <>
-      <header className={railExpanded ? "topbar rail-expanded" : "topbar"}>
+      <header className="topbar">
         <div className="nav-wrap">
           <Logo />
           <div className="topbar-context" aria-label="Network status">
@@ -81,24 +61,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
-      <div className={railExpanded ? "app-frame rail-expanded" : "app-frame"}>
-        <aside
-          className={railExpanded ? "tool-rail rail-expanded" : "tool-rail"}
-          id="workspace-navigation"
-          aria-label="Workspace navigation"
-        >
-          <button
-            className="tool-rail-toggle"
-            type="button"
-            onClick={() => setRailExpanded((expanded) => !expanded)}
-            aria-label={railExpanded ? "Collapse navigation" : "Expand navigation"}
-            aria-expanded={railExpanded}
-            aria-controls="workspace-navigation"
-            title={railExpanded ? "Collapse navigation" : "Expand navigation"}
-          >
-            {railExpanded ? <PanelLeftClose aria-hidden="true" /> : <PanelLeftOpen aria-hidden="true" />}
-            <span>Navigation</span>
-          </button>
+      <div className="app-frame">
+        <aside className="tool-rail" aria-label="Workspace navigation">
           {links.map((link) => (
             <Link
               aria-label={link.label}
