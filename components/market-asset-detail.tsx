@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useMemo, useState } from "react";
 import { ExternalLink } from "lucide-react";
-import { parseUnits } from "viem";
+import { formatUnits, parseUnits } from "viem";
 import { ArbitragePriceGap } from "@/components/arbitrage-price-gap";
 import { MarketArbitrageHistory } from "@/components/market-arbitrage-history";
 import { MarketAutomationPanel } from "@/components/market-automation-panel";
@@ -40,18 +40,22 @@ export function MarketAssetDetail({
   arbitrageReadiness,
   marketComparison,
   initialOpportunity,
+  initialAmountRaw,
 }: {
   market: VerifiedMarket;
   arbitrageReadiness: ArbitrageMarketReadiness | null;
   marketComparison: MarketComparisonState;
   initialOpportunity: ArbitrageOpportunity | null;
+  initialAmountRaw: string;
 }) {
   const chain = CHAINS[market.chain];
   const [view, setView] = useState<"arbitrage" | MarketAssetKind>("arbitrage");
   const [estimatedProfitRaw, setEstimatedProfitRaw] = useState<string | null>(
     null,
   );
-  const [arbitrageBudget, setArbitrageBudget] = useState("1");
+  const [arbitrageBudget, setArbitrageBudget] = useState(() =>
+    formatUnits(BigInt(initialAmountRaw), market.reserveDecimals),
+  );
   const [activeArbitrageAmountRaw, setActiveArbitrageAmountRaw] = useState<
     string | null
   >(null);
@@ -197,6 +201,7 @@ export function MarketAssetDetail({
                   onOpportunityChange={setWatchOpportunity}
                   active={Boolean(activeArbitrageAmountRaw)}
                   activeQuote={activeExecutionQuote}
+                  activeReason={activeWatchReason}
                 />
               ) : (
                 <div className="price-gap-view">

@@ -320,6 +320,7 @@ export function ArbitragePriceGap({
   onOpportunityChange,
   active = false,
   activeQuote = null,
+  activeReason = "",
 }: {
   market: VerifiedMarket;
   marketComparison: MarketComparisonState;
@@ -329,6 +330,7 @@ export function ArbitragePriceGap({
   onOpportunityChange?: (opportunity: ArbitrageOpportunity | null) => void;
   active?: boolean;
   activeQuote?: DirectArbitrageExecutionQuote | null;
+  activeReason?: string;
 }) {
   const initialMatches = Boolean(
     initialOpportunity &&
@@ -555,7 +557,13 @@ export function ArbitragePriceGap({
   const headline = (() => {
     if (netPositive && route)
       return `+${((route.netReturnBps ?? route.gapBps) / 100).toFixed(2)}% price gap`;
-    if (active && !activeQuote) return "Checking prices";
+    if (active && !activeQuote) {
+      if (/gas/i.test(activeReason)) return "Gas too high";
+      if (/relay|setup/i.test(activeReason)) return "Setup needed";
+      if (/busy|network/i.test(activeReason)) return "Network busy";
+      if (/no route|not executable/i.test(activeReason)) return "No route right now";
+      return "Checking prices";
+    }
     if (!active && loading) return "Checking prices";
     if (quotedAmountRaw === null) return "Enter an amount";
     return "No profit right now";

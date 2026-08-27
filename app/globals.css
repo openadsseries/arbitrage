@@ -654,7 +654,6 @@ button { color: inherit; }
 .market-number small { margin-top: 4px; color: var(--muted); font-size: var(--text-meta); font-weight: 500; }
 .market-number::before { display: none; }
 .market-arbitrage-preview strong { color: var(--muted-strong); }
-.market-arbitrage-preview.positive strong { color: var(--success); }
 .market-arbitrage-preview.state-ready strong { color: var(--success); }
 .market-arbitrage-preview.state-waiting-gas strong { color: var(--warning); }
 .market-buy { width: fit-content; min-height: 34px; display: inline-flex; align-items: center; justify-content: center; justify-self: end; gap: 5px; padding: 0 9px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; font-size: var(--text-meta); font-weight: 800; line-height: 1; white-space: nowrap; cursor: pointer; transition: color .16s ease, background-color .16s ease; }
@@ -662,8 +661,6 @@ button { color: inherit; }
 .onchain-market-table .market-buy { justify-self: center; }
 .market-buy svg { width: 13px; }
 .market-buy:hover { color: var(--brand-pink-hover); background: var(--brand-pink-soft); }
-.market-row.has-opportunity .market-buy { color: var(--brand-pink-hover); background: var(--brand-pink-soft); }
-.market-row.has-opportunity .market-buy:hover { color: white; background: var(--brand-pink-hover); }
 .venue-status { display: inline-flex; width: fit-content; padding: 5px 7px; border-radius: 5px; font-size: var(--text-meta); font-weight: 800; }
 .venue-status.bond { color: var(--warning); background: var(--warning-soft); }
 .venue-status.live { color: var(--success); background: var(--success-soft); }
@@ -1597,11 +1594,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .table-head { min-height: 38px; color: var(--muted); background: transparent; font-weight: 500; letter-spacing: 0; }
 .market-row { min-height: 62px; background: transparent; }
 .market-row:hover { background: rgba(66,184,131,.045); }
-.market-row.has-opportunity { box-shadow: none; }
 .market-row small { color: var(--muted); }
-.market-arbitrage-preview.positive strong { color: var(--success); }
 .market-buy { min-height: 32px; justify-self: center; border: 0; border-radius: 3px; color: var(--muted); background: transparent; font-weight: 500; }
-.market-row.has-opportunity .market-buy { color: var(--accent); background: transparent; }
 .market-buy:hover { color: var(--ink); background: rgba(255,255,255,.025); }
 .skeleton-row span { background: var(--surface-raised); }
 

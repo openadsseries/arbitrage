@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  assessPublicArbitrageOpportunity,
   calculateArbitrageRoute,
   getArbitrageCurveAmounts,
   getArbitrageMinimumProfit,
@@ -103,7 +104,7 @@ describe("arbitrage opportunity math", () => {
     expect(best?.route.netPositive).toBe(true);
   });
 
-  it("prefers an active quote and falls back to the market quote", () => {
+  it("never falls back to a pre-gas market quote for active automation", () => {
     const preview = calculateArbitrageRoute({
       direction: "Mint then sell",
       amountIn: 100n,
@@ -122,7 +123,47 @@ describe("arbitrage opportunity math", () => {
     });
 
     expect(selectDisplayedArbitrageRoute(true, active, preview)).toBe(active);
-    expect(selectDisplayedArbitrageRoute(true, null, preview)).toBe(preview);
+    expect(selectDisplayedArbitrageRoute(true, null, preview)).toBeNull();
     expect(selectDisplayedArbitrageRoute(false, null, preview)).toBe(preview);
+  });
+
+  it("classifies a large pre-gas return as a price gap, not execution readiness", () => {
+    const route = calculateArbitrageRoute({
+      direction: "Mint then sell",
+      amountIn: 100_000_000n,
+      amountOut: 224_157_152n,
+      limit: 100_000_000n,
+      protocolFeeBps: 0,
+      executorRewardBps: 2_000,
+    });
+    const assessment = assessPublicArbitrageOpportunity({
+      chain: "base",
+      hToken: "0x0000000000000000000000000000000000000001",
+      hSymbol: "hBNKR",
+      reserveToken: "0x0000000000000000000000000000000000000002",
+      reserveSymbol: "BNKR",
+      reserveDecimals: 8,
+      checkedAmountRaw: "100000000",
+      hAmountRaw: "647604546",
+      protocolFeeBps: 0,
+      executorRewardBps: 2_000,
+      priceBasis: {
+        reserveUsd: null,
+        mintClubUsd: null,
+        poolUsd: null,
+        hAmountRaw: null,
+      },
+      bestDirection: route.direction,
+      routes: [route],
+      curveSamples: [],
+      readBlock: "1",
+      quotedAt: 1,
+    });
+
+    expect(assessment.stage).toBe("price-gap");
+    expect(assessment.gapBps).toBe(9_932);
+    expect(assessment.gasChecked).toBe(false);
+    expect(assessment).not.toHaveProperty("ready");
+    expect(assessment).not.toHaveProperty("positive");
   });
 });

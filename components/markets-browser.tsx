@@ -10,9 +10,9 @@ import { ChainBadge } from "@/components/chain-badge";
 import { tokenLogoUrl } from "@/components/token-logo";
 import type {
   ArbitrageOpportunity,
-  ArbitrageOpportunityRoute,
+  PublicArbitrageAssessment,
 } from "@/lib/arbitrage";
-import { selectBestOpportunityRoute } from "@/lib/arbitrage";
+import { assessPublicArbitrageOpportunity } from "@/lib/arbitrage";
 import { CHAINS, type ChainKey } from "@/lib/chains";
 import { compact, usd } from "@/lib/format";
 import { readManifests } from "@/lib/manifest";
@@ -20,7 +20,7 @@ import type { VerifiedMarket } from "@/lib/onchain-types";
 
 type ArbitragePreviewState =
   | { status: "checking" }
-  | { status: "ready"; bps: number; route: ArbitrageOpportunityRoute["direction"] | null; positive: boolean }
+  | { status: "loaded"; assessment: PublicArbitrageAssessment }
   | { status: "unavailable" };
 
 function amount(raw: string, decimals: number) {
@@ -44,14 +44,23 @@ function oneReserveToken(decimals: number) {
 function previewLabel(preview: ArbitragePreviewState | undefined) {
   if (!preview || preview.status === "checking") return "Checking";
   if (preview.status === "unavailable") return "—";
-  if (!preview.positive) return "0.00%";
-  return `+${(preview.bps / 100).toFixed(2)}%`;
+  if (preview.assessment.stage === "no-gap") return "0.00%";
+  return `+${(preview.assessment.gapBps / 100).toFixed(2)}%`;
 }
 
 function previewHint(preview: ArbitragePreviewState | undefined, reserveSymbol: string) {
   if (!preview || preview.status === "checking") return `Checking 1 ${reserveSymbol}`;
   if (preview.status === "unavailable") return "Unavailable";
   return `At 1 ${reserveSymbol}`;
+}
+
+function hasPriceGap(
+  preview: ArbitragePreviewState | undefined,
+): preview is {
+  status: "loaded";
+  assessment: Extract<PublicArbitrageAssessment, { stage: "price-gap" }>;
+} {
+  return preview?.status === "loaded" && preview.assessment.stage === "price-gap";
 }
 
 export function MarketsBrowser({
@@ -65,7 +74,7 @@ export function MarketsBrowser({
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
-  const [view, setView] = useState<"all" | "opportunities">("all");
+  const [view, setView] = useState<"all" | "price-gaps">("all");
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState("");
   const [marketError, setMarketError] = useState(initialError);
@@ -142,11 +151,11 @@ export function MarketsBrowser({
     for (const market of [...remoteMarkets, ...walletLaunched]) map.set(`${market.chain}-${market.token.toLowerCase()}`, market);
     return [...map.values()];
   }, [remoteMarkets, walletLaunched]);
-  const opportunityCount = useMemo(
+  const priceGapCount = useMemo(
     () =>
       allMarkets.filter((market) => {
         const preview = arbitragePreviews[`${market.chain}-${market.token.toLowerCase()}`];
-        return preview?.status === "ready" && preview.positive;
+        return hasPriceGap(preview);
       }).length,
     [allMarkets, arbitragePreviews],
   );
@@ -158,13 +167,13 @@ export function MarketsBrowser({
         if (!search.includes(searchQuery)) return false;
         if (view === "all") return true;
         const preview = arbitragePreviews[`${market.chain}-${market.token.toLowerCase()}`];
-        return preview?.status === "ready" && preview.positive;
+        return hasPriceGap(preview);
       })
       .sort((left, right) => {
         const leftPreview = arbitragePreviews[`${left.chain}-${left.token.toLowerCase()}`];
         const rightPreview = arbitragePreviews[`${right.chain}-${right.token.toLowerCase()}`];
-        const leftBps = leftPreview?.status === "ready" && leftPreview.positive ? leftPreview.bps : -1;
-        const rightBps = rightPreview?.status === "ready" && rightPreview.positive ? rightPreview.bps : -1;
+        const leftBps = hasPriceGap(leftPreview) ? leftPreview.assessment.gapBps : -1;
+        const rightBps = hasPriceGap(rightPreview) ? rightPreview.assessment.gapBps : -1;
         return rightBps - leftBps;
       });
   }, [allMarkets, arbitragePreviews, query, view]);
@@ -219,6 +228,7 @@ export function MarketsBrowser({
         const payload = (await response.json()) as {
           opportunities?: {
             token: string;
+            assessment?: PublicArbitrageAssessment;
             opportunity: ArbitrageOpportunity;
           }[];
           error?: string;
@@ -230,15 +240,12 @@ export function MarketsBrowser({
           const next = { ...current };
           for (const result of payload.opportunities ?? []) {
             const key = `base-${result.token.toLowerCase()}`;
-            const route = selectBestOpportunityRoute(result.opportunity);
-            next[key] = route
-              ? {
-                  status: "ready",
-                  bps: route.netReturnBps ?? route.gapBps,
-                  route: route.direction,
-                  positive: Boolean(route.netPositive ?? route.profitable),
-                }
-              : { status: "unavailable" };
+            next[key] = {
+              status: "loaded",
+              assessment:
+                result.assessment ??
+                assessPublicArbitrageOpportunity(result.opportunity),
+            };
           }
           return next;
         });
@@ -298,7 +305,7 @@ export function MarketsBrowser({
         </div>
         <div className="markets-overview" aria-label="Market overview">
           <div><span>Markets</span><strong>{allMarkets.length}</strong></div>
-          <div><span>Positive gaps</span><strong>{opportunityCount}</strong></div>
+          <div><span>Price gaps</span><strong>{priceGapCount}</strong></div>
         </div>
       </header>
 
@@ -307,7 +314,7 @@ export function MarketsBrowser({
             <div className="market-search"><Search /><input aria-label="Search markets" placeholder="Search token, reserve or address" value={query} onChange={(event) => { setQuery(event.target.value); setAddressMatches([]); }} /></div>
             <div className="market-filters" role="group" aria-label="Filter markets">
               <button aria-pressed={view === "all"} onClick={() => setView("all")} type="button">All</button>
-              <button aria-pressed={view === "opportunities"} onClick={() => setView("opportunities")} type="button">Positive gaps</button>
+              <button aria-pressed={view === "price-gaps"} onClick={() => setView("price-gaps")} type="button">Price gaps</button>
             </div>
             {isAddress(query.trim()) && <button className="button-ghost" disabled={opening} type="submit">{opening ? <LoaderCircle className="spin" /> : <>Open market <ArrowRight /></>}</button>}
             <Link className="button-primary markets-create" href="/launch"><Plus />Create a pool</Link>
@@ -318,25 +325,25 @@ export function MarketsBrowser({
           {remoteUnavailableChains.length > 0 && <p className="partial-note">Some networks are temporarily unavailable. Available markets remain live.</p>}
           {loadingMarkets && markets.length === 0 ? (
             <div className="market-table onchain-market-table loading">
-              <div className="table-head"><span>Market</span><span>Price</span><span>Market cap</span><span>Backing</span><span>Gap at 1 token</span><span>Action</span></div>
+              <div className="table-head"><span>Market</span><span>Price</span><span>Market cap</span><span>Backing</span><span>Price gap</span><span>Action</span></div>
               {[0, 1, 2, 3].map((item) => <div className="market-row skeleton-row" key={item}><span /><span /><span /><span /><span /><span /></div>)}
             </div>
           ) : markets.length === 0 ? (
             <div className="empty-state compact">
-              <h2>{view === "opportunities" ? "No positive gaps right now." : query ? "No matching market." : "No Hyped Token pool yet."}</h2>
-              <p>{view === "opportunities" ? "The actual gap is recalculated for your amount." : query ? "Enter a Hyped Token address to search every supported network." : "Open any supported Hyped Token directly by its address."}</p>
+              <h2>{view === "price-gaps" ? "No price gaps right now." : query ? "No matching market." : "No Hyped Token pool yet."}</h2>
+              <p>{view === "price-gaps" ? "Prices are compared again for your amount on the market page." : query ? "Enter a Hyped Token address to search every supported network." : "Open any supported Hyped Token directly by its address."}</p>
             </div>
           ) : (
             <div className="market-table onchain-market-table">
-              <div className="table-head"><span>Market</span><span>Price</span><span>Market cap</span><span>Backing</span><span>Gap at 1 token</span><span>Action</span></div>
+              <div className="table-head"><span>Market</span><span>Price</span><span>Market cap</span><span>Backing</span><span>Price gap</span><span>Action</span></div>
               {markets.map((market) => {
                 const key = `${market.chain}-${market.token.toLowerCase()}`;
                 const preview = arbitragePreviews[key];
-                const href = `/market/${market.chain}/${market.token}`;
+                const benchmarkAmountRaw = oneReserveToken(market.reserveDecimals);
+                const href = `/market/${market.chain}/${market.token}?amountRaw=${benchmarkAmountRaw}`;
                 const prefetch = () => router.prefetch(href);
-                const hasOpportunity = preview?.status === "ready" && preview.positive;
                 return (
-                <div className={`market-row${hasOpportunity ? " has-opportunity" : ""}`} key={`${market.chain}-${market.token}`}>
+                <div className="market-row" key={`${market.chain}-${market.token}`}>
                   <Link className="market-name with-logo" href={href} onFocus={prefetch} onMouseEnter={prefetch}>
                     <span className="token-chain-logo"><Image src={tokenLogoUrl(market.token, market.chain === "base" ? 8453 : 4663)} alt="" width={34} height={34} unoptimized /><ChainBadge chain={market.chain} /></span>
                     <b>{market.symbol}<small>{market.reserveSymbol} reserve</small></b>
@@ -348,9 +355,9 @@ export function MarketsBrowser({
                   <strong className="market-number" data-label="Market cap" title="Current supply multiplied by the current buy price">{market.impliedMarketCapUsd === null ? `${amount(market.impliedMarketCapReserveRaw, market.reserveDecimals)} ${market.reserveSymbol}` : marketCapUsd(market.impliedMarketCapUsd)}</strong>
                   <strong className="market-number" data-label="Backing">{amount(market.reserveBalanceRaw, market.reserveDecimals)} {market.reserveSymbol}</strong>
                   <span
-                    className={`market-number market-arbitrage-preview ${preview?.status === "ready" && preview.positive ? "positive" : ""}`}
-                    data-label="Gap at 1 token"
-                    title={`Calculated at 1 ${market.reserveSymbol}. Your amount is recalculated on the market page.`}
+                    className="market-number market-arbitrage-preview"
+                    data-label="Price gap"
+                    title={`Price difference at 1 ${market.reserveSymbol} after route fees and executor reward. Gas is checked with your amount on the market page.`}
                   >
                     <strong>{previewLabel(preview)}</strong>
                     <small>{previewHint(preview, market.reserveSymbol)}</small>

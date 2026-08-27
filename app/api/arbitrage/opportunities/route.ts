@@ -1,5 +1,6 @@
 import { getAddress, isAddress } from "viem";
 import { z } from "zod";
+import { assessPublicArbitrageOpportunity } from "@/lib/arbitrage";
 import {
   MAX_PUBLIC_ARBITRAGE_QUOTE,
   readCachedArbitrageOpportunity,
@@ -61,13 +62,18 @@ export async function POST(request: Request) {
     const opportunities = await mapWithConcurrency(
       input.items,
       4,
-      async (item) => ({
-        token: getAddress(item.token),
-        opportunity: await readCachedArbitrageOpportunity(
+      async (item) => {
+        const opportunity = await readCachedArbitrageOpportunity(
           getAddress(item.token),
           item.amountRaw,
-        ),
-      }),
+        );
+        return {
+          token: getAddress(item.token),
+          assessment: assessPublicArbitrageOpportunity(opportunity),
+          // Keep the quote during rolling deployments for already-open tabs.
+          opportunity,
+        };
+      },
     );
     return Response.json(
       { opportunities },

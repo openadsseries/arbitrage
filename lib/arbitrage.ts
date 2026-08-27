@@ -214,7 +214,7 @@ export function selectDisplayedArbitrageRoute(
   activeRoute: ArbitrageOpportunityRoute | null,
   previewRoute: ArbitrageOpportunityRoute | null,
 ) {
-  return active ? (activeRoute ?? previewRoute) : previewRoute;
+  return active ? activeRoute : previewRoute;
 }
 
 export type ArbitrageOpportunitySample = {
@@ -247,6 +247,26 @@ export type ArbitrageOpportunity = {
   quotedAt: number;
 };
 
+export type PublicArbitrageAssessment =
+  | {
+      stage: "price-gap";
+      quoteAmountRaw: string;
+      direction: ArbitrageOpportunityRoute["direction"];
+      gapBps: number;
+      ownerDifferenceRaw: string;
+      gasChecked: false;
+      readBlock: string;
+      quotedAt: number;
+    }
+  | {
+      stage: "no-gap";
+      quoteAmountRaw: string;
+      gapBps: 0;
+      gasChecked: false;
+      readBlock: string;
+      quotedAt: number;
+    };
+
 export function selectBestOpportunityRoute(
   opportunity: ArbitrageOpportunity | null | undefined,
 ) {
@@ -259,6 +279,32 @@ export function selectBestOpportunityRoute(
       return leftProfit > rightProfit ? -1 : 1;
     })[0] ?? null
   );
+}
+
+export function assessPublicArbitrageOpportunity(
+  opportunity: ArbitrageOpportunity,
+): PublicArbitrageAssessment {
+  const route = selectBestOpportunityRoute(opportunity);
+  if (!route || !route.netPositive) {
+    return {
+      stage: "no-gap",
+      quoteAmountRaw: opportunity.checkedAmountRaw,
+      gapBps: 0,
+      gasChecked: false,
+      readBlock: opportunity.readBlock,
+      quotedAt: opportunity.quotedAt,
+    };
+  }
+  return {
+    stage: "price-gap",
+    quoteAmountRaw: opportunity.checkedAmountRaw,
+    direction: route.direction,
+    gapBps: route.netReturnBps,
+    ownerDifferenceRaw: route.ownerDifferenceRaw,
+    gasChecked: false,
+    readBlock: opportunity.readBlock,
+    quotedAt: opportunity.quotedAt,
+  };
 }
 
 export type DirectArbitrageExecutionQuote = {
