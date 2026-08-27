@@ -1,0 +1,20 @@
+import { describe, expect, it, vi } from "vitest";
+import { injectedProviderFrom, injectedWalletError } from "./injected-wallet";
+
+describe("injectedProviderFrom", () => {
+  it("returns only a valid injected EIP-1193 provider", () => {
+    const provider = { request: vi.fn() };
+    expect(injectedProviderFrom({ ethereum: provider })).toBe(provider);
+    expect(injectedProviderFrom({ ethereum: {} })).toBeNull();
+    expect(injectedProviderFrom(null)).toBeNull();
+  });
+});
+
+describe("injectedWalletError", () => {
+  it("turns wallet errors into short user messages", () => {
+    expect(injectedWalletError({ code: 4001 })).toBe("Connection cancelled in wallet.");
+    expect(injectedWalletError({ cause: { code: -32002 } })).toBe("Open your wallet to finish connecting.");
+    expect(injectedWalletError({ code: 4100 })).toBe("Allow this site in your wallet, then try again.");
+    expect(injectedWalletError(new Error("internal provider details"))).toBe("Wallet connection failed. Try again.");
+  });
+});

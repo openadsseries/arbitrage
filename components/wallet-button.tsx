@@ -1,17 +1,32 @@
 "use client";
 
-import { LoaderCircle, Wallet } from "lucide-react";
+import { CircleAlert, LoaderCircle, Wallet, X } from "lucide-react";
 import { shortAddress } from "@/lib/format";
 import { useWallet } from "@/components/wallet-provider";
 
 export function WalletButton() {
-  const { address, chainKey, connecting, connect } = useWallet();
+  const { address, chainKey, connecting, error, clearError, connect } = useWallet();
   if (!address) {
     return (
-      <button className="wallet-button" disabled={connecting} onClick={() => void connect()} type="button">
-        {connecting ? <LoaderCircle className="spin" /> : <Wallet />}
-        <span>Connect wallet</span>
-      </button>
+      <div className="wallet-control">
+        <button
+          aria-describedby={error ? "wallet-error" : undefined}
+          className="wallet-button"
+          disabled={connecting}
+          onClick={() => void connect()}
+          type="button"
+        >
+          {connecting ? <LoaderCircle className="spin" /> : <Wallet />}
+          <span>{connecting ? "Connecting" : "Connect wallet"}</span>
+        </button>
+        {error && (
+          <div className="wallet-error" id="wallet-error" role="alert">
+            <CircleAlert aria-hidden="true" />
+            <span>{error}</span>
+            <button aria-label="Dismiss wallet message" onClick={clearError} type="button"><X /></button>
+          </div>
+        )}
+      </div>
     );
   }
   return (

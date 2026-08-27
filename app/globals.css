@@ -65,12 +65,18 @@ button { color: inherit; }
 .main-nav a:hover, .main-nav a.active { color: var(--ink); }
 .nav-actions { display: flex; align-items: center; gap: 10px; }
 .network-pill { color: var(--muted); font-size: var(--text-meta); font-weight: 700; }
+.wallet-control { position: relative; }
 .wallet-button { min-height: 38px; display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: var(--surface); font-size: var(--text-meta); font-weight: 600; cursor: pointer; }
 .wallet-button svg { width: 15px; height: 15px; }
 .wallet-button:disabled { opacity: .55; cursor: wait; }
 .wallet-button.connected i { width: 7px; height: 7px; border-radius: 50%; background: #6be0ad; }
 .wallet-button.connected.unsupported i { background: #e6a847; }
 .wallet-button.connected small { color: #d7ced4; font-size: var(--text-meta); text-transform: capitalize; }
+.wallet-error { position: absolute; width: max-content; max-width: min(330px, calc(100vw - 28px)); top: calc(100% + 9px); right: 0; z-index: 60; display: grid; grid-template-columns: 16px minmax(0,1fr) 20px; align-items: start; gap: 8px; padding: 11px 10px; border: 1px solid rgba(224,107,97,.4); border-radius: 7px; color: #ffb7b0; background: #18110f; box-shadow: 0 16px 36px rgba(0,0,0,.3); font-size: var(--text-meta); line-height: 1.45; }
+.wallet-error > svg { width: 16px; height: 16px; margin-top: 1px; }
+.wallet-error button { width: 20px; height: 20px; display: grid; place-items: center; padding: 0; border: 0; color: var(--muted); background: transparent; cursor: pointer; }
+.wallet-error button:hover { color: var(--ink); }
+.wallet-error button svg { width: 13px; height: 13px; }
 .menu-toggle { display: none; border: 0; background: transparent; }
 
 /* Home */
@@ -1526,6 +1532,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .hero-message h1 { margin: 15px 0 20px; font-size: var(--text-display); line-height: .98; letter-spacing: -.055em; }
 .hero-copy { color: var(--muted); }
 .hero-proof { color: var(--muted); }
+.home-hero > .co-movement { width: min(100%, 720px); justify-self: start; }
 .co-movement, .arbitrage-loop { padding: 20px; border-radius: 10px; border-color: var(--line); background: rgba(14,20,18,.98); box-shadow: none; }
 .co-movement-head, .co-movement-values, .home-arbitrage-preview { border-color: var(--line); }
 .timeframe-tabs, .chart-foot, .series-value, .mechanism-note { background: var(--surface-soft); }
@@ -1633,6 +1640,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   :root { --layout-gutter: 32px; --text-display: 3.5rem; --text-page-title: 2.25rem; }
   .home-hero { grid-template-columns: 1fr; }
   .hero-message { max-width: 760px; padding-bottom: 0; }
+  .home-hero > .co-movement { width: min(100%, 820px); justify-self: start; }
   .markets-heading { align-items: flex-start; flex-direction: column; }
   .markets-overview { width: 100%; }
   .table-head, .market-row { grid-template-columns: 1.2fr repeat(3,1fr) .9fr; }

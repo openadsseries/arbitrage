@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -17,16 +18,15 @@ import {
   getAddress,
   http,
   type Address,
-  type EIP1193Provider,
   type PublicClient,
   type WalletClient,
 } from "viem";
 import { CHAINS, getChainKeyById, getViemChain, type ChainKey } from "@/lib/chains";
-
-type InjectedProvider = EIP1193Provider & {
-  on?: (event: string, listener: (...args: unknown[]) => void) => void;
-  removeListener?: (event: string, listener: (...args: unknown[]) => void) => void;
-};
+import {
+  injectedProviderFrom,
+  injectedWalletError,
+  type InjectedProvider,
+} from "@/lib/injected-wallet";
 
 type WalletContextValue = {
   address: Address | null;
@@ -35,6 +35,7 @@ type WalletContextValue = {
   available: boolean;
   connecting: boolean;
   error: string;
+  clearError: () => void;
   connect: (preferredChain?: ChainKey) => Promise<Address | null>;
   disconnect: () => void;
   switchChain: (chain: ChainKey) => Promise<void>;
@@ -46,7 +47,7 @@ const WalletContext = createContext<WalletContextValue | null>(null);
 
 function injectedProvider() {
   if (typeof window === "undefined") return null;
-  return (window as Window & { ethereum?: InjectedProvider }).ethereum ?? null;
+  return injectedProviderFrom(window);
 }
 
 function parseChainId(value: unknown) {
@@ -58,40 +59,73 @@ function parseChainId(value: unknown) {
 export function WalletProvider({ children }: { children: ReactNode }) {
   const [address, setAddress] = useState<Address | null>(null);
   const [chainId, setChainId] = useState<number | null>(null);
+  const [provider, setProvider] = useState<InjectedProvider | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState("");
-  const available = Boolean(injectedProvider());
+  const providerRef = useRef<InjectedProvider | null>(null);
+  const available = Boolean(provider);
 
-  const sync = useCallback(async () => {
-    const provider = injectedProvider();
-    if (!provider) return;
+  const rememberProvider = useCallback((nextProvider: InjectedProvider | null) => {
+    providerRef.current = nextProvider;
+    setProvider((current) => current === nextProvider ? current : nextProvider);
+    return nextProvider;
+  }, []);
+
+  const currentProvider = useCallback(() => {
+    const nextProvider = injectedProvider();
+    if (nextProvider && nextProvider !== providerRef.current) rememberProvider(nextProvider);
+    return nextProvider ?? providerRef.current;
+  }, [rememberProvider]);
+
+  const sync = useCallback(async (targetProvider?: InjectedProvider | null) => {
+    const activeProvider = targetProvider ?? currentProvider();
+    if (!activeProvider) return;
     const [accounts, nextChainId] = await Promise.all([
-      provider.request({ method: "eth_accounts" }) as Promise<string[]>,
-      provider.request({ method: "eth_chainId" }),
+      activeProvider.request({ method: "eth_accounts" }) as Promise<string[]>,
+      activeProvider.request({ method: "eth_chainId" }),
     ]);
     setAddress(accounts[0] ? getAddress(accounts[0]) : null);
     setChainId(parseChainId(nextChainId));
-  }, []);
+  }, [currentProvider]);
 
   useEffect(() => {
-    const provider = injectedProvider();
+    let checks = 0;
+    const detect = () => {
+      const nextProvider = injectedProvider();
+      if (nextProvider) rememberProvider(nextProvider);
+      return Boolean(nextProvider);
+    };
+    detect();
+    const handleInitialized = () => detect();
+    window.addEventListener("ethereum#initialized", handleInitialized);
+    const timer = window.setInterval(() => {
+      checks += 1;
+      if (detect() || checks >= 12) window.clearInterval(timer);
+    }, 250);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("ethereum#initialized", handleInitialized);
+    };
+  }, [rememberProvider]);
+
+  useEffect(() => {
     if (!provider) return;
     // Initial account hydration synchronizes React with the injected wallet.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void sync();
-    const handleAccounts = () => void sync();
-    const handleChain = () => void sync();
+    void sync(provider).catch(() => undefined);
+    const handleAccounts = () => void sync(provider).catch(() => undefined);
+    const handleChain = () => void sync(provider).catch(() => undefined);
     provider.on?.("accountsChanged", handleAccounts);
     provider.on?.("chainChanged", handleChain);
     return () => {
       provider.removeListener?.("accountsChanged", handleAccounts);
       provider.removeListener?.("chainChanged", handleChain);
     };
-  }, [sync]);
+  }, [provider, sync]);
 
   const switchChain = useCallback(async (chain: ChainKey) => {
-    const provider = injectedProvider();
-    if (!provider) throw new Error("Install or enable an injected wallet to continue.");
+    const provider = currentProvider();
+    if (!provider) throw new Error("Wallet extension needed.");
     const capability = CHAINS[chain];
     const hexChainId = `0x${capability.id.toString(16)}`;
     try {
@@ -114,39 +148,42 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       });
     }
     await sync();
-  }, [sync]);
+  }, [currentProvider, sync]);
 
   const connect = useCallback(async (preferredChain?: ChainKey) => {
-    const provider = injectedProvider();
+    const provider = currentProvider();
     if (!provider) {
-      setError("No injected wallet was found.");
+      setError("Wallet extension needed. Install or enable one, then try again.");
       return null;
     }
     setConnecting(true);
     setError("");
     try {
-      if (preferredChain) await switchChain(preferredChain);
       const accounts = await provider.request({ method: "eth_requestAccounts" }) as string[];
       const nextAddress = accounts[0] ? getAddress(accounts[0]) : null;
+      if (!nextAddress) throw new Error("No wallet account was returned.");
       setAddress(nextAddress);
-      await sync();
+      if (preferredChain) await switchChain(preferredChain);
+      await sync(provider);
       return nextAddress;
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Wallet connection was cancelled.");
+      setError(injectedWalletError(reason));
       return null;
     } finally {
       setConnecting(false);
     }
-  }, [switchChain, sync]);
+  }, [currentProvider, switchChain, sync]);
 
   const disconnect = useCallback(() => {
     setAddress(null);
     setError("");
   }, []);
 
+  const clearError = useCallback(() => setError(""), []);
+
   const getWalletClient = useCallback(async (chain: ChainKey) => {
-    const provider = injectedProvider();
-    if (!provider) throw new Error("No injected wallet was found.");
+    const provider = currentProvider();
+    if (!provider) throw new Error("Wallet extension needed.");
     const expected = CHAINS[chain].id;
     const current = parseChainId(await provider.request({ method: "eth_chainId" }));
     if (current !== expected) await switchChain(chain);
@@ -157,10 +194,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       chain: getViemChain(chain),
       transport: custom(provider),
     });
-  }, [switchChain]);
+  }, [currentProvider, switchChain]);
 
   const getPublicClient = useCallback(async (chain: ChainKey) => {
-    const provider = injectedProvider();
+    const provider = currentProvider();
     if (!provider) throw new Error("No injected wallet was found.");
     const expected = CHAINS[chain].id;
     const current = parseChainId(await provider.request({ method: "eth_chainId" }));
@@ -181,7 +218,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
             ])
           : http(`${window.location.origin}/api/rpc/${chain}`),
     });
-  }, [switchChain]);
+  }, [currentProvider, switchChain]);
 
   const value = useMemo<WalletContextValue>(() => ({
     address,
@@ -190,12 +227,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     available,
     connecting,
     error,
+    clearError,
     connect,
     disconnect,
     switchChain,
     getPublicClient,
     getWalletClient,
-  }), [address, available, chainId, connect, connecting, disconnect, error, getPublicClient, getWalletClient, switchChain]);
+  }), [address, available, chainId, clearError, connect, connecting, disconnect, error, getPublicClient, getWalletClient, switchChain]);
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
 }
