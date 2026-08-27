@@ -9,6 +9,7 @@ import {
   Play,
   ShieldCheck,
 } from "lucide-react";
+import { ArbitrageRouteChecks } from "@/components/arbitrage-route-checks";
 import { encodeFunctionData, formatUnits, type Address } from "viem";
 import {
   ArbitrageWatchHelp,
@@ -21,10 +22,14 @@ import {
   ERC20_PERMISSION_ABI,
   getArbitrageMinimumProfit,
   getArbitrageRepeatLimit,
+  selectBestOpportunityRoute,
   type ArbitrageMarketReadiness,
+  type ArbitrageOpportunity,
   type ContinuousArbitrageSnapshot,
   type DirectArbitrageExecutionQuote,
 } from "@/lib/arbitrage";
+import { buildArbitrageRouteChecks } from "@/lib/arbitrage-route-status";
+import type { ArbitrageRouteCheck } from "@/lib/arbitrage-route-status";
 import { compactActionError as errorMessage } from "@/lib/errors";
 import {
   readContinuousArbitrageSnapshot,
@@ -67,9 +72,13 @@ class RelayRequestError extends Error {
   }
 }
 
-const WATCH_VISIBLE_MS = 30_000;
-const WATCH_HIDDEN_MS = 120_000;
+const WATCH_VISIBLE_MS = 60_000;
+const WATCH_WAITING_MS = 120_000;
+const WATCH_HIDDEN_MS = 5 * 60_000;
 const RELAY_COOLDOWN_MS = 12_000;
+const RELAY_STATUS_MS = 10 * 60_000;
+const RELAY_SAFETY_CHECK_MS = 5 * 60_000;
+const RELAY_PROFIT_RECHECK_BPS = 500n;
 const AUTO_REPEAT_COUNT = 10n;
 const PASSIVE_WATCH_REASONS = new Set([
   "Base is busy. Try again soon.",
@@ -80,6 +89,13 @@ const PASSIVE_WATCH_REASONS = new Set([
   "Relay needs Base ETH.",
   "Relay paused for today.",
 ]);
+
+function watchDelay(reason: string) {
+  if (document.visibilityState !== "visible") return WATCH_HIDDEN_MS;
+  return PASSIVE_WATCH_REASONS.has(reason)
+    ? WATCH_WAITING_MS
+    : WATCH_VISIBLE_MS;
+}
 
 function relayWatchReason(reason: unknown) {
   if (reason instanceof RelayRequestError) {
@@ -111,26 +127,39 @@ function hasLiveMarketStrategy(
   );
 }
 
+type RelayProbeGate = {
+  checkedAt: number;
+  direction: ArbitrageOpportunity["routes"][number]["direction"];
+  ownerProfitRaw: string;
+  quote: DirectArbitrageExecutionQuote | null;
+};
+
 export function MarketAutomationPanel({
   market,
   initialReadiness,
   onActiveAmountChange,
   onActiveQuoteChange,
   onWatchReasonChange,
+  onWatchCheckedAtChange,
+  onRouteChecksChange,
   budget,
   budgetRaw,
   onBudgetChange,
   estimatedProfitRaw,
+  watchOpportunity,
 }: {
   market: VerifiedMarket;
   initialReadiness: ArbitrageMarketReadiness | null;
   onActiveAmountChange?: (raw: string | null) => void;
   onActiveQuoteChange?: (quote: DirectArbitrageExecutionQuote | null) => void;
   onWatchReasonChange?: (reason: string) => void;
+  onWatchCheckedAtChange?: (checkedAt: number | null) => void;
+  onRouteChecksChange?: (checks: ArbitrageRouteCheck[]) => void;
   budget: string;
   budgetRaw: bigint | null;
   onBudgetChange: (value: string) => void;
   estimatedProfitRaw: string | null;
+  watchOpportunity: ArbitrageOpportunity | null;
 }) {
   const wallet = useWallet();
   const snapshotState = useContinuousArbitrageSnapshot(wallet.address);
@@ -148,10 +177,20 @@ export function MarketAutomationPanel({
   const [watchReason, setWatchReason] = useState("");
   const [lastRelayQuote, setLastRelayQuote] =
     useState<DirectArbitrageExecutionQuote | null>(null);
+  const [lastWatchCheckedAt, setLastWatchCheckedAt] = useState<number | null>(
+    null,
+  );
   const [relayStatus, setRelayStatus] = useState<RelayStatus | null>(null);
   const [showRevoke, setShowRevoke] = useState(false);
   const relayInFlight = useRef(false);
   const relayCooldownUntil = useRef(0);
+  const relayProbeGate = useRef<RelayProbeGate | null>(null);
+  const relayStatusCheckedAt = useRef(0);
+  const watchReasonRef = useRef("");
+  const watchRouteRef = useRef<
+    ArbitrageOpportunity["routes"][number] | null
+  >(null);
+  const watchQuoteReadyRef = useRef(false);
 
   const readRelayStatus = useCallback(async () => {
     const response = await fetch("/api/arbitrage/relay", { cache: "no-store" });
@@ -165,8 +204,17 @@ export function MarketAutomationPanel({
 
   useEffect(() => {
     let active = true;
-    const check = () => {
-      void readRelayStatus().catch((reason) => {
+    const check = (force = false) => {
+      if (
+        !force &&
+        Date.now() - relayStatusCheckedAt.current < RELAY_STATUS_MS
+      )
+        return;
+      void readRelayStatus()
+        .then(() => {
+          relayStatusCheckedAt.current = Date.now();
+        })
+        .catch((reason) => {
         if (!active) return;
         setRelayStatus({
           ready: false,
@@ -177,11 +225,18 @@ export function MarketAutomationPanel({
         });
       });
     };
-    check();
-    const timer = window.setInterval(check, 60_000);
+    const checkWhenVisible = () => {
+      if (document.visibilityState === "visible") check();
+    };
+    check(true);
+    const timer = window.setInterval(checkWhenVisible, RELAY_STATUS_MS);
+    window.addEventListener("focus", checkWhenVisible);
+    document.addEventListener("visibilitychange", checkWhenVisible);
     return () => {
       active = false;
       window.clearInterval(timer);
+      window.removeEventListener("focus", checkWhenVisible);
+      document.removeEventListener("visibilitychange", checkWhenVisible);
     };
   }, [readRelayStatus]);
 
@@ -320,14 +375,59 @@ export function MarketAutomationPanel({
   const relayReason = relayStatus?.ready === false ? relayStatus.message : "";
   const effectiveWatchReason = relayReason || watchReason;
   const activeStatusLabel = arbitrageWatchLabel(effectiveWatchReason);
+  const watchRoute = useMemo(() => {
+    if (
+      !running ||
+      watchOpportunity?.checkedAmountRaw !== running.maxReservePerExecutionRaw
+    )
+      return null;
+    const route = selectBestOpportunityRoute(watchOpportunity);
+    return route &&
+      Boolean(route.netPositive ?? route.profitable) &&
+      BigInt(route.ownerDifferenceRaw) > 0n
+      ? route
+      : null;
+  }, [running, watchOpportunity]);
+  const watchRouteReady = Boolean(watchRoute);
+  const routeChecks = useMemo(
+    () =>
+      buildArbitrageRouteChecks({
+        readiness,
+        opportunity: watchOpportunity,
+        reserveBalanceRaw: market.reserveBalanceRaw,
+        active: Boolean(running),
+        reason: effectiveWatchReason,
+        quote: lastRelayQuote,
+      }),
+    [
+      effectiveWatchReason,
+      lastRelayQuote,
+      market.reserveBalanceRaw,
+      readiness,
+      running,
+      watchOpportunity,
+    ],
+  );
+  useEffect(() => {
+    onRouteChecksChange?.(routeChecks);
+  }, [onRouteChecksChange, routeChecks]);
+
+  useEffect(() => {
+    watchRouteRef.current = watchRoute;
+    watchQuoteReadyRef.current = Boolean(
+      running &&
+        watchOpportunity?.checkedAmountRaw ===
+          running.maxReservePerExecutionRaw,
+    );
+  }, [running, watchOpportunity, watchRoute]);
 
   useEffect(() => {
     onActiveAmountChange?.(running?.maxReservePerExecutionRaw ?? null);
   }, [onActiveAmountChange, running?.maxReservePerExecutionRaw]);
   useEffect(() => {
+    watchReasonRef.current = effectiveWatchReason;
     onWatchReasonChange?.(effectiveWatchReason);
   }, [effectiveWatchReason, onWatchReasonChange]);
-
   const relayStrategy = useCallback(
     async (address: Address, strategyId: string) => {
       const response = await fetch("/api/arbitrage/relay", {
@@ -342,6 +442,42 @@ export function MarketAutomationPanel({
     },
     [],
   );
+
+  const shouldProbeRelay = useCallback(async () => {
+    const route = watchRouteRef.current;
+    if (!route) return false;
+    const gate = relayProbeGate.current;
+    if (!gate) return true;
+    if (gate.direction !== route.direction) return true;
+
+    const previousProfit = BigInt(gate.ownerProfitRaw);
+    const currentProfit = BigInt(route.ownerDifferenceRaw);
+    if (
+      previousProfit <= 0n ||
+      currentProfit * 10_000n >=
+        previousProfit * (10_000n + RELAY_PROFIT_RECHECK_BPS)
+    )
+      return true;
+    if (Date.now() - gate.checkedAt >= RELAY_SAFETY_CHECK_MS) return true;
+
+    const previousQuote = gate.quote;
+    if (
+      !previousQuote ||
+      BigInt(previousQuote.gasPriceRaw) <= 0n ||
+      BigInt(previousQuote.requiredWethRaw) <= 0n
+    )
+      return false;
+    try {
+      const client = await wallet.getPublicClient("base");
+      const currentGasPrice = await client.getGasPrice();
+      const projectedRequired =
+        (BigInt(previousQuote.requiredWethRaw) * currentGasPrice) /
+        BigInt(previousQuote.gasPriceRaw);
+      return BigInt(previousQuote.rewardWethRaw) >= projectedRequired;
+    } catch {
+      return false;
+    }
+  }, [wallet]);
 
   useEffect(() => {
     if (
@@ -359,6 +495,24 @@ export function MarketAutomationPanel({
         schedule();
         return;
       }
+      const shouldProbe = await shouldProbeRelay();
+      if (!active) return;
+      const checkedAt = Date.now();
+      setLastWatchCheckedAt(checkedAt);
+      onWatchCheckedAtChange?.(checkedAt);
+      if (!shouldProbe) {
+        if (watchQuoteReadyRef.current && !watchRouteRef.current) {
+          setWatchReason("No route now.");
+          setLastRelayQuote(null);
+          onActiveQuoteChange?.(null);
+        } else if (watchRouteRef.current) {
+          setWatchReason((current) =>
+            current === "No route now." ? "" : current,
+          );
+        }
+        schedule();
+        return;
+      }
       relayInFlight.current = true;
       try {
         const payload = await relayStrategy(wallet.address!, running.id);
@@ -368,6 +522,7 @@ export function MarketAutomationPanel({
         relayCooldownUntil.current = Date.now() + RELAY_COOLDOWN_MS;
         if (!active) return;
         setWatchReason("");
+        relayProbeGate.current = null;
         setMessage("Executed. Still watching.");
         await refreshSettledWalletState(wallet.address!, preparation);
       } catch (reason) {
@@ -380,6 +535,15 @@ export function MarketAutomationPanel({
           setLastRelayQuote(quote);
           onActiveQuoteChange?.(quote);
           setWatchReason(text);
+          const route = watchRouteRef.current;
+          if (route) {
+            relayProbeGate.current = {
+              checkedAt: Date.now(),
+              direction: route.direction,
+              ownerProfitRaw: route.ownerDifferenceRaw,
+              quote,
+            };
+          }
           if (PASSIVE_WATCH_REASONS.has(text)) setError("");
         }
       } finally {
@@ -389,11 +553,10 @@ export function MarketAutomationPanel({
     };
     const schedule = () => {
       if (!active) return;
-      const delay =
-        document.visibilityState === "visible"
-          ? WATCH_VISIBLE_MS
-          : WATCH_HIDDEN_MS;
-      timeout = window.setTimeout(() => void run(), delay);
+      timeout = window.setTimeout(
+        () => void run(),
+        watchDelay(watchReasonRef.current),
+      );
     };
     void run();
     return () => {
@@ -403,12 +566,15 @@ export function MarketAutomationPanel({
   }, [
     activeSnapshot?.executor,
     onActiveQuoteChange,
+    onWatchCheckedAtChange,
     preparation,
     refreshSettledWalletState,
     relayStrategy,
     relayStatus?.ready,
     running,
+    shouldProbeRelay,
     wallet.address,
+    watchRouteReady,
   ]);
 
   async function execute() {
@@ -418,6 +584,8 @@ export function MarketAutomationPanel({
     setError("");
     setMessage("");
     setWatchReason("");
+    setLastWatchCheckedAt(null);
+    onWatchCheckedAtChange?.(null);
     let approvalMayRemain = false;
     try {
       const currentRelayStatus = await readRelayStatus();
@@ -689,6 +857,8 @@ export function MarketAutomationPanel({
       }
       setShowRevoke(false);
       setReserveAllowanceRaw(0n);
+      setLastWatchCheckedAt(null);
+      onWatchCheckedAtChange?.(null);
       setMessage("Arbitrage stopped and permission removed.");
       await refreshSettledWalletState(wallet.address, preparation);
     } catch (reason) {
@@ -800,11 +970,13 @@ export function MarketAutomationPanel({
                 quote={lastRelayQuote}
                 reserveSymbol={market.reserveSymbol}
                 reserveDecimals={market.reserveDecimals}
+                checkedAt={lastWatchCheckedAt}
               />
             </span>
             <small>{effectiveWatchReason || "This browser"}</small>
           </div>
           <h2>{arbitrageWatchPanelTitle(effectiveWatchReason)}</h2>
+          <ArbitrageRouteChecks checks={routeChecks} />
           <dl className="market-auto-summary">
             <div>
               <dt>Profit</dt>
@@ -845,7 +1017,7 @@ export function MarketAutomationPanel({
         </>
       ) : (
         <>
-          <span className="kicker">2 · Execute</span>
+          <span className="kicker">2 · Start</span>
           <div className="market-auto-budget">
             <label htmlFor="arbitrage-budget">Per run</label>
             <div className="market-auto-budget-input">
@@ -881,6 +1053,7 @@ export function MarketAutomationPanel({
             </dl>
             {budgetError && <em>{budgetError}</em>}
           </div>
+          <ArbitrageRouteChecks checks={routeChecks} />
           <button
             className="button-primary automation-action"
             disabled={
@@ -900,7 +1073,7 @@ export function MarketAutomationPanel({
                 : !relayStatus.ready
                   ? "Setup needed"
                   : preparation
-                    ? "Execute arbitrage"
+                    ? "Start arbitrage"
                     : "Preparing"}
           </button>
         </>
@@ -932,6 +1105,9 @@ export function MarketAutomationPanel({
         quote={lastRelayQuote}
         reserveSymbol={market.reserveSymbol}
         reserveDecimals={market.reserveDecimals}
+        checkedAt={running ? lastWatchCheckedAt : null}
+        checks={routeChecks}
+        active={Boolean(running)}
       />
     </section>
   );

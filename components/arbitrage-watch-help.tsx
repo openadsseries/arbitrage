@@ -1,9 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { CircleHelp, Info, X } from "lucide-react";
 import { formatUnits } from "viem";
+import { ArbitrageRouteChecks } from "@/components/arbitrage-route-checks";
 import type { DirectArbitrageExecutionQuote } from "@/lib/arbitrage";
+import type { ArbitrageRouteCheck } from "@/lib/arbitrage-route-status";
 
 function tokenAmount(raw: string, decimals: number) {
   return Number(formatUnits(BigInt(raw), decimals)).toLocaleString("en-US", {
@@ -65,7 +68,7 @@ export function arbitrageWatchCopy(reason: string) {
       meaning:
         "There is profit, but the relay reward is smaller than the gas needed to execute.",
       action:
-        "Use a larger amount, wait for lower gas, or raise the executor reward in a future strategy.",
+        "Keep this browser open. It checks again automatically. A larger amount can also help.",
     };
   }
   if (reason === "Base is busy. Try again soon.") {
@@ -115,13 +118,19 @@ export function ArbitrageWatchHelp({
   quote,
   reserveSymbol,
   reserveDecimals,
+  checkedAt = null,
   trigger = "icon",
+  checks = [],
+  active = false,
 }: {
   reason: string;
   quote: DirectArbitrageExecutionQuote | null;
   reserveSymbol: string;
   reserveDecimals: number;
+  checkedAt?: number | null;
   trigger?: "icon" | "details";
+  checks?: ArbitrageRouteCheck[];
+  active?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const copy = arbitrageWatchCopy(reason);
@@ -135,6 +144,18 @@ export function ArbitrageWatchHelp({
     copy.title === "Waiting for gas" && coverage !== null
       ? `The relay reward covers ${coverage}% of gas, so it waits.`
       : copy.meaning;
+  const checkedLabel = checkedAt
+    ? new Date(checkedAt).toLocaleTimeString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        second: "2-digit",
+      })
+    : null;
+  const relayLabel = quote
+    ? "Ready"
+    : copy.title === "Setup needed" || copy.title === "Relay needs gas"
+      ? "Not ready"
+      : "Checking";
 
   return (
     <>
@@ -156,7 +177,7 @@ export function ArbitrageWatchHelp({
           <CircleHelp />
         </button>
       )}
-      {open && (
+      {open && createPortal(
         <div
           className="market-details-layer"
           role="presentation"
@@ -177,18 +198,48 @@ export function ArbitrageWatchHelp({
             >
               <X />
             </button>
-            <span className="kicker">Status</span>
-            <h2>{copy.title}</h2>
+            <span className="kicker">Route status</span>
+            <h2>{active ? copy.title : "How execution works"}</h2>
+            {checks.length > 0 && (
+              <ArbitrageRouteChecks checks={checks} showDetails />
+            )}
             <div className="market-details-grid status-details-grid">
               <div>
-                <strong>Meaning</strong>
-                <p>{meaning}</p>
+                <strong>Current state</strong>
+                <p>{active ? meaning : "One start keeps both directions under review."}</p>
               </div>
               <div>
-                <strong>What helps</strong>
-                <p>{copy.action}</p>
+                <strong>Next execution</strong>
+                <p>
+                  {active
+                    ? copy.action
+                    : "It runs only when Reserve, pool liquidity, fees, price impact, reward, and gas all pass."}
+                </p>
               </div>
             </div>
+            <p className="market-details-cycle">
+              Each execution reduces the gap. Monitoring continues and runs again only after prices create a new executable route.
+            </p>
+            {checkedLabel && (
+              <dl>
+                <div>
+                  <dt>Monitoring</dt>
+                  <dd>Active in this browser</dd>
+                </div>
+                <div>
+                  <dt>Last checked</dt>
+                  <dd>{checkedLabel}</dd>
+                </div>
+                <div>
+                  <dt>Relay</dt>
+                  <dd>{relayLabel}</dd>
+                </div>
+                <div>
+                  <dt>Execution</dt>
+                  <dd>{copy.title}</dd>
+                </div>
+              </dl>
+            )}
             {quote && (
               <dl>
                 <div>
@@ -214,10 +265,17 @@ export function ArbitrageWatchHelp({
                     {gasUsd ? ` · ≈ ${gasUsd}` : ""}
                   </dd>
                 </div>
+                {coverage !== null && (
+                  <div>
+                    <dt>Gas covered</dt>
+                    <dd>{coverage}%</dd>
+                  </div>
+                )}
               </dl>
             )}
           </section>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );

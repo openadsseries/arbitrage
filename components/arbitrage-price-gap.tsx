@@ -9,6 +9,7 @@ import {
   type ArbitrageOpportunity,
   type ArbitrageOpportunityRoute,
   type DirectArbitrageExecutionQuote,
+  selectBestOpportunityRoute,
   selectDisplayedArbitrageRoute,
 } from "@/lib/arbitrage";
 import { CHAINS } from "@/lib/chains";
@@ -316,18 +317,18 @@ export function ArbitragePriceGap({
   initialOpportunity,
   checkedAmountRaw,
   onEstimatedProfitChange,
+  onOpportunityChange,
   active = false,
   activeQuote = null,
-  watchReason = "",
 }: {
   market: VerifiedMarket;
   marketComparison: MarketComparisonState;
   initialOpportunity?: ArbitrageOpportunity | null;
   checkedAmountRaw: bigint | null;
   onEstimatedProfitChange?: (raw: string | null) => void;
+  onOpportunityChange?: (opportunity: ArbitrageOpportunity | null) => void;
   active?: boolean;
   activeQuote?: DirectArbitrageExecutionQuote | null;
-  watchReason?: string;
 }) {
   const initialMatches = Boolean(
     initialOpportunity &&
@@ -418,7 +419,6 @@ export function ArbitragePriceGap({
   }, [checkedAmountRaw]);
 
   useEffect(() => {
-    if (active) return;
     if (quotedAmountRaw === null) {
       const timer = window.setTimeout(() => {
         opportunityRef.current = null;
@@ -491,7 +491,7 @@ export function ArbitragePriceGap({
     } else {
       void read(true);
     }
-    const interval = window.setInterval(refreshWhenVisible, 30_000);
+    const interval = window.setInterval(refreshWhenVisible, 60_000);
     document.addEventListener("visibilitychange", refreshWhenVisible);
     window.addEventListener("focus", refreshWhenVisible);
     return () => {
@@ -501,18 +501,12 @@ export function ArbitragePriceGap({
       window.removeEventListener("focus", refreshWhenVisible);
       controller?.abort();
     };
-  }, [active, market.token, quotedAmountRaw]);
+  }, [market.token, quotedAmountRaw]);
 
-  const previewRoute = useMemo(() => {
-    if (!opportunity) return null;
-    return (
-      [...opportunity.routes].sort((left, right) => {
-        const a = BigInt(left.ownerDifferenceRaw);
-        const b = BigInt(right.ownerDifferenceRaw);
-        return a === b ? 0 : a > b ? -1 : 1;
-      })[0] ?? null
-    );
-  }, [opportunity]);
+  const previewRoute = useMemo(
+    () => selectBestOpportunityRoute(opportunity),
+    [opportunity],
+  );
   const activeRoute = useMemo<ArbitrageOpportunityRoute | null>(() => {
     if (!activeQuote) return null;
     const ownerProfit = BigInt(activeQuote.expectedOwnerProfitRaw);
@@ -559,24 +553,8 @@ export function ArbitragePriceGap({
       )
     : null;
   const headline = (() => {
-    if (watchReason === "Gas too high." || watchReason === "Waiting for gas.")
-      return "Gas too high";
-    if (watchReason === "Relay needs Base ETH.") return "Relay needs gas";
-    if (
-      watchReason === "Relay setup needed." ||
-      watchReason === "Relay not configured."
-    )
-      return "Setup needed";
-    if (watchReason === "Relay paused for today.") return "Paused today";
-    if (watchReason === "Base is busy. Try again soon.")
-      return "Checking prices";
-    if (
-      active &&
-      (watchReason === "No route now." || watchReason === "Not executable now.")
-    )
-      return "No profit right now";
     if (netPositive && route)
-      return `+${((route.netReturnBps ?? route.gapBps) / 100).toFixed(2)}% ${active ? "profit opportunity" : "price gap"}`;
+      return `+${((route.netReturnBps ?? route.gapBps) / 100).toFixed(2)}% price gap`;
     if (active && !activeQuote) return "Checking prices";
     if (!active && loading) return "Checking prices";
     if (quotedAmountRaw === null) return "Enter an amount";
@@ -588,6 +566,9 @@ export function ArbitragePriceGap({
       netPositive && route ? route.ownerDifferenceRaw : null,
     );
   }, [netPositive, onEstimatedProfitChange, route]);
+  useEffect(() => {
+    onOpportunityChange?.(opportunity);
+  }, [onOpportunityChange, opportunity]);
 
   return (
     <div className="price-gap-view">

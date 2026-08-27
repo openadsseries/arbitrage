@@ -103,7 +103,7 @@ describe("arbitrage opportunity math", () => {
     expect(best?.route.netPositive).toBe(true);
   });
 
-  it("never substitutes a preview quote for an active strategy", () => {
+  it("prefers an active quote and falls back to the market quote", () => {
     const preview = calculateArbitrageRoute({
       direction: "Mint then sell",
       amountIn: 100n,
@@ -112,8 +112,17 @@ describe("arbitrage opportunity math", () => {
       protocolFeeBps: 0,
       executorRewardBps: 2_000,
     });
+    const active = calculateArbitrageRoute({
+      direction: "Buy then redeem",
+      amountIn: 1_000n,
+      amountOut: 1_050n,
+      limit: 1_000n,
+      protocolFeeBps: 0,
+      executorRewardBps: 2_000,
+    });
 
-    expect(selectDisplayedArbitrageRoute(true, null, preview)).toBeNull();
+    expect(selectDisplayedArbitrageRoute(true, active, preview)).toBe(active);
+    expect(selectDisplayedArbitrageRoute(true, null, preview)).toBe(preview);
     expect(selectDisplayedArbitrageRoute(false, null, preview)).toBe(preview);
   });
 });

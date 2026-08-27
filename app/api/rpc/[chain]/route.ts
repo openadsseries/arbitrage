@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { CHAINS, type ChainKey } from "@/lib/chains";
-import { rateLimit } from "@/lib/server/request-guard";
+import {
+  rateLimit,
+  requireSameOriginJson,
+} from "@/lib/server/request-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -158,6 +161,14 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ chain: string }> },
 ) {
+  const forbidden = requireSameOriginJson(request);
+  if (forbidden) return forbidden;
+  const globallyLimited = rateLimit(request, "rpc-global", {
+    limit: 6_000,
+    windowMs: 60_000,
+    key: "all",
+  });
+  if (globallyLimited) return globallyLimited;
   const limited = rateLimit(request, "rpc", { limit: 120, windowMs: 60_000 });
   if (limited) return limited;
   try {

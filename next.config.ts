@@ -27,7 +27,7 @@ const securityHeaders = [
       "font-src 'self' data:",
       "style-src 'self' 'unsafe-inline'",
       `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
-      "connect-src 'self' https://mint.club",
+      "connect-src 'self' https://mint.club https://base-rpc.publicnode.com",
     ].join("; "),
   },
 ];

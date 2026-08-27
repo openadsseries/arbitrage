@@ -15,9 +15,10 @@ import {
 const LOG_CHUNK = 10_000n;
 const FINALITY_DEPTH = 20n;
 
-type StartedEvent = { strategyId: string };
+type StartedEvent = { strategyId: string; owner: Address };
 type ExecutionEvent = {
   strategyId: string;
+  owner: Address;
   transactionHash: `0x${string}`;
   blockNumber: string;
   executor: Address;
@@ -42,27 +43,20 @@ function blockRanges(fromBlock: bigint, toBlock: bigint) {
   return ranges;
 }
 
-async function readEventRange(
-  owner: string,
-  fromBlock: string,
-  toBlock: string,
-) {
+async function readEventRange(fromBlock: string, toBlock: string) {
   const client = mintclub.network("base").getPublicClient();
-  const wallet = getAddress(owner);
   const range = { fromBlock: BigInt(fromBlock), toBlock: BigInt(toBlock) };
   const [started, executed] = await Promise.all([
     client.getContractEvents({
       address: getArbitrageExecutorV3("base")!,
       abi: ARBITRAGE_EXECUTOR_V3_ABI,
       eventName: "StrategyStarted",
-      args: { owner: wallet },
       ...range,
     }),
     client.getContractEvents({
       address: getArbitrageExecutorV3("base")!,
       abi: ARBITRAGE_EXECUTOR_V3_ABI,
       eventName: "ArbitrageExecuted",
-      args: { owner: wallet },
       ...range,
     }),
   ]);
@@ -71,12 +65,14 @@ async function readEventRange(
       (log) =>
         ({
           strategyId: (log.args.strategyId ?? 0n).toString(),
+          owner: getAddress(log.args.owner ?? zeroAddress),
         }) satisfies StartedEvent,
     ),
     executions: executed.map(
       (log) =>
         ({
           strategyId: (log.args.strategyId ?? 0n).toString(),
+          owner: getAddress(log.args.owner ?? zeroAddress),
           transactionHash: log.transactionHash,
           blockNumber: log.blockNumber.toString(),
           executor: getAddress(log.args.executor ?? zeroAddress),
@@ -102,7 +98,7 @@ async function readEventRange(
 
 const readFinalizedEventRange = unstable_cache(
   readEventRange,
-  ["continuous-arbitrage-v3-events-v1"],
+  ["continuous-arbitrage-v3-events-v2"],
   { revalidate: false },
 );
 
@@ -158,6 +154,7 @@ export async function readContinuousArbitrageSnapshot(
       "The continuous arbitrage executor block is ahead of Base.",
     );
   const ranges = blockRanges(deploymentBlock, readBlock);
+  const walletAddress = getAddress(wallet);
   const finalizedBlock =
     readBlock > FINALITY_DEPTH ? readBlock - FINALITY_DEPTH : 0n;
 
@@ -167,11 +164,7 @@ export async function readContinuousArbitrageSnapshot(
         range.toBlock <= finalizedBlock
           ? readFinalizedEventRange
           : readEventRange;
-      return reader(
-        wallet,
-        range.fromBlock.toString(),
-        range.toBlock.toString(),
-      );
+      return reader(range.fromBlock.toString(), range.toBlock.toString());
     }),
     client.readContract({
       address: executor,
@@ -185,7 +178,12 @@ export async function readContinuousArbitrageSnapshot(
     }),
   ]);
 
-  const started = eventChunks.flatMap((chunk) => chunk.started);
+  const started = eventChunks
+    .flatMap((chunk) => chunk.started)
+    .filter(
+      (event) =>
+        event.owner.toLowerCase() === walletAddress.toLowerCase(),
+    );
   const strategyReads = await client.multicall({
     allowFailure: false,
     contracts: started.map((log) => ({
@@ -229,6 +227,10 @@ export async function readContinuousArbitrageSnapshot(
 
   const executions = eventChunks
     .flatMap((chunk) => chunk.executions)
+    .filter(
+      (event) =>
+        event.owner.toLowerCase() === walletAddress.toLowerCase(),
+    )
     .map(
       (log) =>
         ({

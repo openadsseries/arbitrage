@@ -214,7 +214,7 @@ export function selectDisplayedArbitrageRoute(
   activeRoute: ArbitrageOpportunityRoute | null,
   previewRoute: ArbitrageOpportunityRoute | null,
 ) {
-  return active ? activeRoute : previewRoute;
+  return active ? (activeRoute ?? previewRoute) : previewRoute;
 }
 
 export type ArbitrageOpportunitySample = {
@@ -246,6 +246,20 @@ export type ArbitrageOpportunity = {
   readBlock: string;
   quotedAt: number;
 };
+
+export function selectBestOpportunityRoute(
+  opportunity: ArbitrageOpportunity | null | undefined,
+) {
+  if (!opportunity) return null;
+  return (
+    [...opportunity.routes].sort((left, right) => {
+      const leftProfit = BigInt(left.ownerDifferenceRaw);
+      const rightProfit = BigInt(right.ownerDifferenceRaw);
+      if (leftProfit === rightProfit) return 0;
+      return leftProfit > rightProfit ? -1 : 1;
+    })[0] ?? null
+  );
+}
 
 export type DirectArbitrageExecutionQuote = {
   executor: Address;

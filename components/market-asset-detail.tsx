@@ -16,6 +16,7 @@ import type {
   ArbitrageOpportunity,
   DirectArbitrageExecutionQuote,
 } from "@/lib/arbitrage";
+import type { ArbitrageRouteCheck } from "@/lib/arbitrage-route-status";
 import type { MarketAssetKind, VerifiedMarket } from "@/lib/onchain-types";
 import type { MarketComparisonState } from "@/lib/server/gecko-comparison";
 
@@ -30,7 +31,7 @@ function geckoUrl(network: string, token: string, embed = false) {
   url.searchParams.set("light_chart", "0");
   url.searchParams.set("chart_type", "price");
   url.searchParams.set("resolution", "1d");
-  url.searchParams.set("bg_color", "151315");
+  url.searchParams.set("bg_color", "0e1412");
   return url.toString();
 }
 
@@ -56,7 +57,13 @@ export function MarketAssetDetail({
   >(null);
   const [activeExecutionQuote, setActiveExecutionQuote] =
     useState<DirectArbitrageExecutionQuote | null>(null);
+  const [watchOpportunity, setWatchOpportunity] =
+    useState<ArbitrageOpportunity | null>(null);
   const [activeWatchReason, setActiveWatchReason] = useState("");
+  const [activeWatchCheckedAt, setActiveWatchCheckedAt] = useState<
+    number | null
+  >(null);
+  const [routeChecks, setRouteChecks] = useState<ArbitrageRouteCheck[]>([]);
   const arbitrageBudgetRaw = useMemo(() => {
     try {
       const value = parseUnits(arbitrageBudget, market.reserveDecimals);
@@ -65,7 +72,14 @@ export function MarketAssetDetail({
       return null;
     }
   }, [arbitrageBudget, market.reserveDecimals]);
-  const quoteBudgetRaw = arbitrageBudgetRaw;
+  const quoteBudgetRaw = useMemo(() => {
+    if (!activeArbitrageAmountRaw) return arbitrageBudgetRaw;
+    try {
+      return BigInt(activeArbitrageAmountRaw);
+    } catch {
+      return arbitrageBudgetRaw;
+    }
+  }, [activeArbitrageAmountRaw, arbitrageBudgetRaw]);
   const asset: MarketAssetKind = view === "og" ? "og" : "hyped";
 
   const selected =
@@ -180,11 +194,9 @@ export function MarketAssetDetail({
                   marketComparison={marketComparison}
                   initialOpportunity={initialOpportunity}
                   onEstimatedProfitChange={setEstimatedProfitRaw}
+                  onOpportunityChange={setWatchOpportunity}
                   active={Boolean(activeArbitrageAmountRaw)}
                   activeQuote={activeExecutionQuote}
-                  watchReason={
-                    activeArbitrageAmountRaw ? activeWatchReason : ""
-                  }
                 />
               ) : (
                 <div className="price-gap-view">
@@ -206,10 +218,13 @@ export function MarketAssetDetail({
                 onActiveAmountChange={setActiveArbitrageAmountRaw}
                 onActiveQuoteChange={setActiveExecutionQuote}
                 onWatchReasonChange={setActiveWatchReason}
+                onWatchCheckedAtChange={setActiveWatchCheckedAt}
+                onRouteChecksChange={setRouteChecks}
                 budget={arbitrageBudget}
                 budgetRaw={arbitrageBudgetRaw}
                 onBudgetChange={setArbitrageBudget}
                 estimatedProfitRaw={estimatedProfitRaw}
+                watchOpportunity={watchOpportunity}
               />
             </aside>
           </section>
@@ -217,6 +232,8 @@ export function MarketAssetDetail({
             market={market}
             watchReason={activeWatchReason}
             activeQuote={activeExecutionQuote}
+            checkedAt={activeWatchCheckedAt}
+            routeChecks={routeChecks}
           />
         </>
       )}

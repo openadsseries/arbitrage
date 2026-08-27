@@ -25,6 +25,7 @@ import {
   useContinuousArbitrageSnapshot,
 } from "@/lib/continuous-arbitrage-client";
 import type { VerifiedMarket } from "@/lib/onchain-types";
+import type { ArbitrageRouteCheck } from "@/lib/arbitrage-route-status";
 
 function tokenAmount(raw: string, decimals: number) {
   const value = Number(formatUnits(BigInt(raw), decimals));
@@ -46,10 +47,14 @@ export function MarketArbitrageHistory({
   market,
   watchReason,
   activeQuote,
+  checkedAt,
+  routeChecks = [],
 }: {
   market: VerifiedMarket;
   watchReason?: string;
   activeQuote?: DirectArbitrageExecutionQuote | null;
+  checkedAt?: number | null;
+  routeChecks?: ArbitrageRouteCheck[];
 }) {
   const wallet = useWallet();
   const snapshotState = useContinuousArbitrageSnapshot(wallet.address);
@@ -219,6 +224,9 @@ export function MarketArbitrageHistory({
                 quote={activeQuote ?? null}
                 reserveSymbol={market.reserveSymbol}
                 reserveDecimals={market.reserveDecimals}
+                checkedAt={checkedAt}
+                checks={routeChecks}
+                active
               />
             </span>
             <div className="position-actions">

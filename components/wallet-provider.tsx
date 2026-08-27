@@ -13,6 +13,7 @@ import {
   createPublicClient,
   createWalletClient,
   custom,
+  fallback,
   getAddress,
   http,
   type Address,
@@ -166,7 +167,19 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     if (current !== expected) await switchChain(chain);
     return createPublicClient({
       chain: getViemChain(chain),
-      transport: http(`${window.location.origin}/api/rpc/${chain}`),
+      transport:
+        chain === "base"
+          ? fallback([
+              http("https://base-rpc.publicnode.com", {
+                retryCount: 1,
+                timeout: 8_000,
+              }),
+              http(`${window.location.origin}/api/rpc/base`, {
+                retryCount: 0,
+                timeout: 8_000,
+              }),
+            ])
+          : http(`${window.location.origin}/api/rpc/${chain}`),
     });
   }, [switchChain]);
 

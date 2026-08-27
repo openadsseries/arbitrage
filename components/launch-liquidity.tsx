@@ -23,7 +23,9 @@ import {
   type PublicClient,
   type WalletClient,
 } from "viem";
+import { ArbitrageRouteChecks } from "@/components/arbitrage-route-checks";
 import { useWallet } from "@/components/wallet-provider";
+import type { ArbitrageRouteCheck } from "@/lib/arbitrage-route-status";
 import { CHAINS } from "@/lib/chains";
 import { saveManifest } from "@/lib/manifest";
 import type { ArbitragePreview, LaunchManifest, LiquidityPreparation } from "@/lib/types";
@@ -452,6 +454,40 @@ function LaunchVerified({ manifest }: { manifest: LaunchManifest }) {
   const [preview, setPreview] = useState<ArbitragePreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const routeOpen = Boolean(
+    preview?.mintRoute.profitableBeforeGas ||
+      preview?.redeemRoute.profitableBeforeGas,
+  );
+  const routeChecks: ArbitrageRouteCheck[] = [
+    {
+      key: "reserve",
+      label: "Mint Club",
+      value: "Backed",
+      tone: "ready",
+      detail: "The Hyped Token can convert through its Reserve.",
+    },
+    {
+      key: "pool",
+      label: "External pool",
+      value: "Live",
+      tone: "ready",
+      detail: "The external Hyped Token pool has active liquidity.",
+    },
+    {
+      key: "costs",
+      label: "Costs",
+      value: preview ? (routeOpen ? "Gas at run" : "Waiting") : "Checking",
+      tone: "waiting",
+      detail: "Fees and price impact are checked now. Gas is checked before execution.",
+    },
+    {
+      key: "automation",
+      label: "Automation",
+      value: "Ready",
+      tone: "ready",
+      detail: "The Market page can keep checking both directions after one start.",
+    },
+  ];
 
   async function check(raw?: string) {
     if (!manifest.execution.hypedToken) return;
@@ -491,10 +527,10 @@ function LaunchVerified({ manifest }: { manifest: LaunchManifest }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [manifest.chain, manifest.execution.hypedToken, manifest.liquidity?.hypedAmountRaw]);
 
-  return <div className="panel confirmed-panel route-verified"><CheckCircle2 /><span className="kicker">Pool verified</span><h2>The arbitrage loop is ready.</h2><p>The OG market, Mint Club conversion, and Hyped Token pool are readable onchain. A price difference may open a route; profit is never guaranteed.</p><div className="route-check-form"><label>Compare with<input type="number" min="0" step="any" value={amount} onChange={(event) => setAmount(event.target.value)} /><span>{manifest.input.hypedSymbol}</span></label><button className="button-ghost" disabled={busy || !amount} onClick={() => void check()} type="button">{busy ? <LoaderCircle className="spin" /> : "Refresh routes"}</button></div>{preview && <div className="route-results"><RouteResult label={`Mint ${preview.hypedSymbol}, then sell`} route={preview.mintRoute} preview={preview} /><RouteResult label={`Buy ${preview.hypedSymbol}, then redeem`} route={preview.redeemRoute} preview={preview} /></div>}<p className="route-method">Live executable quotes · Uniswap and Mint Club fees included · Gas excluded · Read at block #{preview?.readBlock ?? "—"}</p>{error && <p className="form-error">{error}</p>}<div className="verified-links"><a className="button-ghost" href={`${chain.explorerUrl}/address/${manifest.execution.pool}`} target="_blank" rel="noreferrer">Pool contract <ExternalLink /></a><Link className="button-primary" href={`/market/${manifest.chain}/${manifest.execution.hypedToken}`}>Open market</Link></div></div>;
+  return <div className="panel confirmed-panel route-verified"><CheckCircle2 /><span className="kicker">Pool verified</span><h2>Arbitrage is ready.</h2><ArbitrageRouteChecks checks={routeChecks} /><div className="route-check-form"><label>Compare with<input type="number" min="0" step="any" value={amount} onChange={(event) => setAmount(event.target.value)} /><span>{manifest.input.hypedSymbol}</span></label><button className="button-ghost" disabled={busy || !amount} onClick={() => void check()} type="button">{busy ? <LoaderCircle className="spin" /> : "Refresh routes"}</button></div>{preview && <div className="route-results"><RouteResult label={`Mint ${preview.hypedSymbol}, then sell`} route={preview.mintRoute} preview={preview} /><RouteResult label={`Buy ${preview.hypedSymbol}, then redeem`} route={preview.redeemRoute} preview={preview} /></div>}<p className="route-method">Live quotes · Trade costs included · Gas checked before execution · Block #{preview?.readBlock ?? "—"}</p>{error && <p className="form-error">{error}</p>}<div className="verified-links"><a className="button-ghost" href={`${chain.explorerUrl}/address/${manifest.execution.pool}`} target="_blank" rel="noreferrer">Pool contract <ExternalLink /></a><Link className="button-primary" href={`/market/${manifest.chain}/${manifest.execution.hypedToken}`}>Open market</Link></div></div>;
 }
 
 function RouteResult({ label, route, preview }: { label: string; route: ArbitragePreview["mintRoute"]; preview: ArbitragePreview }) {
   const difference = BigInt(route.differenceRaw);
-  return <div className={route.profitableBeforeGas ? "route-open" : ""}><span>{label}</span><strong>{formatUnits(BigInt(route.quoteInRaw), preview.quoteDecimals)} → {formatUnits(BigInt(route.quoteOutRaw), preview.quoteDecimals)} {preview.quoteSymbol}</strong><small>{route.profitableBeforeGas ? `+${formatUnits(difference, preview.quoteDecimals)} before gas` : `${formatUnits(difference, preview.quoteDecimals)} before gas`}</small></div>;
+  return <div className={route.profitableBeforeGas ? "route-open" : ""}><span>{label}</span><strong>{formatUnits(BigInt(route.quoteInRaw), preview.quoteDecimals)} → {formatUnits(BigInt(route.quoteOutRaw), preview.quoteDecimals)} {preview.quoteSymbol}</strong><small>{route.profitableBeforeGas ? `+${formatUnits(difference, preview.quoteDecimals)}` : formatUnits(difference, preview.quoteDecimals)}</small></div>;
 }

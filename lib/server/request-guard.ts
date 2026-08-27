@@ -1,5 +1,7 @@
 import "server-only";
 
+import { validateSameOriginJson } from "@/lib/request-origin";
+
 type RateEntry = { count: number; resetAt: number };
 
 const globalRateStore = globalThis as typeof globalThis & {
@@ -17,6 +19,30 @@ function requestAddress(request: Request) {
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
     "unknown"
   );
+}
+
+export function requireSameOriginJson(request: Request) {
+  const status = validateSameOriginJson({
+    requestUrl: request.url,
+    origin: request.headers.get("origin"),
+    fetchSite: request.headers.get("sec-fetch-site"),
+    contentType: request.headers.get("content-type"),
+    forwardedHost: request.headers.get("x-forwarded-host"),
+    forwardedProtocol: request.headers.get("x-forwarded-proto"),
+  });
+  if (status === 403) {
+    return Response.json(
+      { error: "This request is not allowed." },
+      { status: 403, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  if (status === 415) {
+    return Response.json(
+      { error: "JSON is required." },
+      { status: 415, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  return null;
 }
 
 export function rateLimit(

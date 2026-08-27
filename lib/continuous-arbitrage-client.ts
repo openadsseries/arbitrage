@@ -26,7 +26,7 @@ const EMPTY_STATE: SnapshotState = {
   loading: false,
 };
 const FRESH_MS = 5_000;
-const POLL_MS = 30_000;
+const POLL_MS = 2 * 60_000;
 const entries = new Map<string, SnapshotEntry>();
 
 function entryFor(address: Address) {
