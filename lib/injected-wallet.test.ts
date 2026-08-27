@@ -8,6 +8,14 @@ describe("injectedProviderFrom", () => {
     expect(injectedProviderFrom({ ethereum: {} })).toBeNull();
     expect(injectedProviderFrom(null)).toBeNull();
   });
+
+  it("detects OKX injected wallet providers", () => {
+    const okx = { request: vi.fn(), isOkxWallet: true };
+    const fallback = { request: vi.fn() };
+    expect(injectedProviderFrom({ ethereum: { providers: [fallback, okx] } })).toBe(okx);
+    expect(injectedProviderFrom({ okxwallet: okx })).toBe(okx);
+    expect(injectedProviderFrom({ okxwallet: { ethereum: okx } })).toBe(okx);
+  });
 });
 
 describe("injectedWalletError", () => {

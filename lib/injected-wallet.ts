@@ -5,12 +5,34 @@ export type InjectedProvider = EIP1193Provider & {
   removeListener?: (event: string, listener: (...args: unknown[]) => void) => void;
 };
 
-export function injectedProviderFrom(source: unknown): InjectedProvider | null {
-  if (!source || (typeof source !== "object" && typeof source !== "function")) return null;
-  const candidate = (source as { ethereum?: unknown }).ethereum;
-  if (!candidate || (typeof candidate !== "object" && typeof candidate !== "function")) return null;
-  if (!("request" in candidate) || typeof candidate.request !== "function") return null;
+function validProvider(candidate: unknown): InjectedProvider | null {
+  if (!candidate || (typeof candidate !== "object" && typeof candidate !== "function"))
+    return null;
+  if (!("request" in candidate) || typeof candidate.request !== "function")
+    return null;
   return candidate as InjectedProvider;
+}
+
+function nested(source: unknown, key: string) {
+  if (!source || (typeof source !== "object" && typeof source !== "function"))
+    return null;
+  return key in source ? (source as Record<string, unknown>)[key] : null;
+}
+
+export function injectedProviderFrom(source: unknown): InjectedProvider | null {
+  const ethereum = nested(source, "ethereum");
+  const direct = validProvider(ethereum);
+  if (direct) return direct;
+
+  const providers = nested(ethereum, "providers");
+  if (Array.isArray(providers)) {
+    const okx = providers.find((provider) => Boolean(nested(provider, "isOkxWallet")));
+    const preferred = validProvider(okx) ?? validProvider(providers[0]);
+    if (preferred) return preferred;
+  }
+
+  const okxWallet = nested(source, "okxwallet") ?? nested(source, "okxWallet");
+  return validProvider(nested(okxWallet, "ethereum")) ?? validProvider(okxWallet);
 }
 
 function walletErrorCode(reason: unknown): number | null {
