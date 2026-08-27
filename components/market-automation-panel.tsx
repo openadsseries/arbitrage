@@ -1043,7 +1043,7 @@ export function MarketAutomationPanel({
                 </dd>
               </div>
               <div>
-                <dt>Est. profit</dt>
+                <dt>Route estimate</dt>
                 <dd className={estimatedProfitRaw ? "positive" : ""}>
                   {estimatedProfitRaw
                     ? `+${reserveAmount(estimatedProfitRaw, market.reserveDecimals)} ${market.reserveSymbol}`

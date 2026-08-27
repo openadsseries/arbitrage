@@ -555,8 +555,9 @@ export function ArbitragePriceGap({
       )
     : null;
   const headline = (() => {
-    if (netPositive && route)
+    if (active && netPositive && route)
       return `+${((route.netReturnBps ?? route.gapBps) / 100).toFixed(2)}% price gap`;
+    if (!active && netPositive && route) return "Route found";
     if (active && !activeQuote) {
       if (/gas/i.test(activeReason)) return "Gas too high";
       if (/relay|setup/i.test(activeReason)) return "Setup needed";

@@ -58,7 +58,7 @@
 
 - Open market detail in `Arbitrage` mode. The first screen compares the two live executable routes and places its single authorization action beside the result.
 - Use one pair title such as `MT ↔ hMT` instead of repeating separate asset cards. Pair it with the concise proposition `One original token. Two connected market prices.`
-- The Markets directory may show a standard-size `Price gap` after price impact, exchange fees and the successful-executor reward. Treat it as discovery data only: it is not an opportunity or an execution promise because gas, wallet balance, allowance and simulation have not been checked.
+- The Markets directory may show only whether a standard-size route exists after price impact, exchange fees and the successful-executor reward. Do not show large pre-gas percentages in the directory; gas, wallet balance, allowance and simulation are checked on the market page.
 - Show `Ready` or an executable profit only from the relay assessment for the user's exact amount. Active automation must never fall back to a public pre-gas quote when the relay assessment is missing or waiting.
 - Show only the strongest currently checked direction in plain token notation. Keep the alternate direction, venue versions, allowances and other route internals out of the primary result or in disclosures.
 - A price-gap result must come from current executable Uniswap and Mint Club quotes at the user's entered Reserve Token amount. Show amount in, amount returned and the user's net after exchange fees and the successful-executor reward. State that gas is verified at execution; never claim gas is already deducted from the quote.

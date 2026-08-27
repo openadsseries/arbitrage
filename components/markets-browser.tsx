@@ -44,14 +44,15 @@ function oneReserveToken(decimals: number) {
 function previewLabel(preview: ArbitragePreviewState | undefined) {
   if (!preview || preview.status === "checking") return "Checking";
   if (preview.status === "unavailable") return "—";
-  if (preview.assessment.stage === "no-gap") return "0.00%";
-  return `+${(preview.assessment.gapBps / 100).toFixed(2)}%`;
+  if (preview.assessment.stage === "no-gap") return "No route";
+  return "Route found";
 }
 
 function previewHint(preview: ArbitragePreviewState | undefined, reserveSymbol: string) {
   if (!preview || preview.status === "checking") return `Checking 1 ${reserveSymbol}`;
   if (preview.status === "unavailable") return "Unavailable";
-  return `At 1 ${reserveSymbol}`;
+  if (preview.assessment.stage === "no-gap") return `At 1 ${reserveSymbol}`;
+  return "Open to check gas";
 }
 
 function hasPriceGap(
@@ -151,7 +152,7 @@ export function MarketsBrowser({
     for (const market of [...remoteMarkets, ...walletLaunched]) map.set(`${market.chain}-${market.token.toLowerCase()}`, market);
     return [...map.values()];
   }, [remoteMarkets, walletLaunched]);
-  const priceGapCount = useMemo(
+  const routeCount = useMemo(
     () =>
       allMarkets.filter((market) => {
         const preview = arbitragePreviews[`${market.chain}-${market.token.toLowerCase()}`];
@@ -305,7 +306,7 @@ export function MarketsBrowser({
         </div>
         <div className="markets-overview" aria-label="Market overview">
           <div><span>Markets</span><strong>{allMarkets.length}</strong></div>
-          <div><span>Price gaps</span><strong>{priceGapCount}</strong></div>
+          <div><span>Routes</span><strong>{routeCount}</strong></div>
         </div>
       </header>
 
@@ -314,7 +315,7 @@ export function MarketsBrowser({
             <div className="market-search"><Search /><input aria-label="Search markets" placeholder="Search token, reserve or address" value={query} onChange={(event) => { setQuery(event.target.value); setAddressMatches([]); }} /></div>
             <div className="market-filters" role="group" aria-label="Filter markets">
               <button aria-pressed={view === "all"} onClick={() => setView("all")} type="button">All</button>
-              <button aria-pressed={view === "price-gaps"} onClick={() => setView("price-gaps")} type="button">Price gaps</button>
+              <button aria-pressed={view === "price-gaps"} onClick={() => setView("price-gaps")} type="button">Routes</button>
             </div>
             {isAddress(query.trim()) && <button className="button-ghost" disabled={opening} type="submit">{opening ? <LoaderCircle className="spin" /> : <>Open market <ArrowRight /></>}</button>}
             <Link className="button-primary markets-create" href="/launch"><Plus />Create a pool</Link>
@@ -325,17 +326,17 @@ export function MarketsBrowser({
           {remoteUnavailableChains.length > 0 && <p className="partial-note">Some networks are temporarily unavailable. Available markets remain live.</p>}
           {loadingMarkets && markets.length === 0 ? (
             <div className="market-table onchain-market-table loading">
-              <div className="table-head"><span>Market</span><span>Price</span><span>Market cap</span><span>Backing</span><span>Price gap</span><span>Action</span></div>
+              <div className="table-head"><span>Market</span><span>Price</span><span>Market cap</span><span>Backing</span><span>Route check</span><span>Action</span></div>
               {[0, 1, 2, 3].map((item) => <div className="market-row skeleton-row" key={item}><span /><span /><span /><span /><span /><span /></div>)}
             </div>
           ) : markets.length === 0 ? (
             <div className="empty-state compact">
-              <h2>{view === "price-gaps" ? "No price gaps right now." : query ? "No matching market." : "No Hyped Token pool yet."}</h2>
-              <p>{view === "price-gaps" ? "Prices are compared again for your amount on the market page." : query ? "Enter a Hyped Token address to search every supported network." : "Open any supported Hyped Token directly by its address."}</p>
+              <h2>{view === "price-gaps" ? "No routes right now." : query ? "No matching market." : "No Hyped Token pool yet."}</h2>
+              <p>{view === "price-gaps" ? "Open a market to check gas and execution." : query ? "Enter a Hyped Token address to search every supported network." : "Open any supported Hyped Token directly by its address."}</p>
             </div>
           ) : (
             <div className="market-table onchain-market-table">
-              <div className="table-head"><span>Market</span><span>Price</span><span>Market cap</span><span>Backing</span><span>Price gap</span><span>Action</span></div>
+              <div className="table-head"><span>Market</span><span>Price</span><span>Market cap</span><span>Backing</span><span>Route check</span><span>Action</span></div>
               {markets.map((market) => {
                 const key = `${market.chain}-${market.token.toLowerCase()}`;
                 const preview = arbitragePreviews[key];
@@ -356,8 +357,8 @@ export function MarketsBrowser({
                   <strong className="market-number" data-label="Backing">{amount(market.reserveBalanceRaw, market.reserveDecimals)} {market.reserveSymbol}</strong>
                   <span
                     className="market-number market-arbitrage-preview"
-                    data-label="Price gap"
-                    title={`Price difference at 1 ${market.reserveSymbol} after route fees and executor reward. Gas is checked with your amount on the market page.`}
+                    data-label="Route check"
+                    title={`A route exists at 1 ${market.reserveSymbol}. Open the market to check gas and execution for your amount.`}
                   >
                     <strong>{previewLabel(preview)}</strong>
                     <small>{previewHint(preview, market.reserveSymbol)}</small>
