@@ -3,6 +3,7 @@ import { z } from "zod";
 import { assessPublicArbitrageOpportunity } from "@/lib/arbitrage";
 import {
   MAX_PUBLIC_ARBITRAGE_QUOTE,
+  readCachedArbitrageBenchmarkOpportunity,
   readCachedArbitrageOpportunity,
 } from "@/lib/server/arbitrage-opportunity-cache";
 import {
@@ -14,17 +15,18 @@ import {
 
 export const dynamic = "force-dynamic";
 
-const itemSchema = z.object({
-  token: z.string().refine(isAddress, "Enter a valid Hyped Token address."),
-  amountRaw: z
-    .string()
-    .regex(/^\d+$/, "Enter a valid Reserve Token budget.")
-    .refine(
-      (value) =>
-        BigInt(value) > 0n && BigInt(value) <= MAX_PUBLIC_ARBITRAGE_QUOTE,
+const tokenSchema = z.string().refine(isAddress, "Enter a valid Hyped Token address.");
+const itemSchema = z.union([
+  z.object({ token: tokenSchema, mode: z.literal("benchmark"), benchmarkUsd: z.literal(10) }),
+  z.object({
+    token: tokenSchema,
+    mode: z.literal("exact"),
+    amountRaw: z.string().regex(/^\d+$/, "Enter a valid Reserve Token budget.").refine(
+      (value) => BigInt(value) > 0n && BigInt(value) <= MAX_PUBLIC_ARBITRAGE_QUOTE,
       "Enter a valid Reserve Token budget.",
     ),
-});
+  }),
+]);
 
 const requestSchema = z.object({
   items: z.array(itemSchema).min(1).max(20),
@@ -63,16 +65,23 @@ export async function POST(request: Request) {
       input.items,
       4,
       async (item) => {
-        const opportunity = await readCachedArbitrageOpportunity(
-          getAddress(item.token),
-          item.amountRaw,
-        );
-        return {
-          token: getAddress(item.token),
-          assessment: assessPublicArbitrageOpportunity(opportunity),
-          // Keep the quote during rolling deployments for already-open tabs.
-          opportunity,
-        };
+        const token = getAddress(item.token);
+        try {
+          const opportunity = item.mode === "benchmark"
+            ? await readCachedArbitrageBenchmarkOpportunity(token, item.benchmarkUsd)
+            : await readCachedArbitrageOpportunity(token, item.amountRaw, "exact");
+          return {
+            token,
+            assessment: assessPublicArbitrageOpportunity(opportunity),
+            // Keep the quote during rolling deployments for already-open tabs.
+            opportunity,
+          };
+        } catch (reason) {
+          return {
+            token,
+            error: reason instanceof Error ? reason.message : "Quote unavailable.",
+          };
+        }
       },
     );
     return Response.json(

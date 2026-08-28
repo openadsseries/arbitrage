@@ -130,6 +130,8 @@ export async function readContinuousArbitrageSnapshot(
     return {
       configured: false,
       executor,
+      legacyExecutor: executor,
+      writeVersion: null,
       deploymentBlock: deploymentBlock?.toString() ?? null,
       protocolFeeBps: 0,
       executorRewardBps: 2_000,
@@ -210,6 +212,8 @@ export async function readContinuousArbitrageSnapshot(
       ] = strategyReads[index];
       return {
         chain: "base",
+        version: "v3",
+        executor,
         id: log.strategyId,
         owner: getAddress(owner),
         hToken: getAddress(hToken),
@@ -221,6 +225,8 @@ export async function readContinuousArbitrageSnapshot(
         maxReservePerExecutionRaw: maximum.toString(),
         remainingVolumeRaw: remainingVolume.toString(),
         minProfitReserveRaw: minimumProfit.toString(),
+        minProfitBps: 0,
+        maxFeeReimbursementReserveRaw: "0",
       } satisfies ContinuousArbitrageStrategy;
     })
     .sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? 1 : -1));
@@ -235,6 +241,8 @@ export async function readContinuousArbitrageSnapshot(
       (log) =>
         ({
           chain: "base",
+          version: "v3",
+          executorContract: executor,
           strategyId: log.strategyId,
           transactionHash: log.transactionHash,
           blockNumber: log.blockNumber,
@@ -247,6 +255,9 @@ export async function readContinuousArbitrageSnapshot(
           protocolFeeReserveRaw: log.protocolFeeReserveRaw,
           executorRewardReserveRaw: log.executorRewardReserveRaw,
           ownerProfitReserveRaw: log.ownerProfitReserveRaw,
+          amountSpentReserveRaw: log.amountInReserveRaw,
+          gasReimbursementReserveRaw: "0",
+          executorIncentiveReserveRaw: log.executorRewardReserveRaw,
           remainingVolumeRaw: log.remainingVolumeRaw,
           executionCount: log.executionCount,
         }) satisfies ContinuousArbitrageExecution,
@@ -256,6 +267,8 @@ export async function readContinuousArbitrageSnapshot(
   return {
     configured: true,
     executor,
+    legacyExecutor: executor,
+    writeVersion: null,
     deploymentBlock: deploymentBlock.toString(),
     protocolFeeBps: Number(protocolFeeBps),
     executorRewardBps: Number(executorRewardBps),

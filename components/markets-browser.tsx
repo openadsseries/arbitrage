@@ -37,31 +37,26 @@ function marketCapUsd(value: number) {
   return value >= 1_000 ? `$${compact(value)}` : usd(value, 2);
 }
 
-function oneReserveToken(decimals: number) {
-  return (10n ** BigInt(decimals)).toString();
-}
-
 function previewLabel(preview: ArbitragePreviewState | undefined) {
   if (!preview || preview.status === "checking") return "Checking";
   if (preview.status === "unavailable") return "—";
-  if (preview.assessment.stage === "no-gap") return "No route";
-  return "Route found";
+  if (preview.assessment.stage === "no-route") return "No return";
+  return `+${(preview.assessment.gapBps / 100).toFixed(2)}% est.`;
 }
 
-function previewHint(preview: ArbitragePreviewState | undefined, reserveSymbol: string) {
-  if (!preview || preview.status === "checking") return `Checking 1 ${reserveSymbol}`;
+function previewHint(preview: ArbitragePreviewState | undefined) {
+  if (!preview || preview.status === "checking") return "Checking $10";
   if (preview.status === "unavailable") return "Unavailable";
-  if (preview.assessment.stage === "no-gap") return `At 1 ${reserveSymbol}`;
-  return "Open to check gas";
+  return "$10 quote";
 }
 
 function hasPriceGap(
   preview: ArbitragePreviewState | undefined,
 ): preview is {
   status: "loaded";
-  assessment: Extract<PublicArbitrageAssessment, { stage: "price-gap" }>;
+  assessment: Extract<PublicArbitrageAssessment, { stage: "estimated-return" }>;
 } {
-  return preview?.status === "loaded" && preview.assessment.stage === "price-gap";
+  return preview?.status === "loaded" && preview.assessment.stage === "estimated-return";
 }
 
 export function MarketsBrowser({
@@ -87,7 +82,7 @@ export function MarketsBrowser({
   const [arbitragePreviews, setArbitragePreviews] = useState<Record<string, ArbitragePreviewState>>({});
   const launchedRequests = useRef(new Set<string>());
   const quoteItemsRef = useRef<
-    { token: string; amountRaw: string; key: string }[]
+    { token: string; key: string }[]
   >([]);
 
   useEffect(() => {
@@ -184,7 +179,6 @@ export function MarketsBrowser({
         .filter((market) => market.chain === "base")
         .map((market) => ({
           token: market.token,
-          amountRaw: oneReserveToken(market.reserveDecimals),
           key: `${market.chain}-${market.token.toLowerCase()}`,
         })),
     [allMarkets],
@@ -192,7 +186,7 @@ export function MarketsBrowser({
   const quoteKey = useMemo(
     () =>
       quoteItems
-        .map((item) => `${item.key}:${item.amountRaw}`)
+        .map((item) => item.key)
         .sort()
         .join("|"),
     [quoteItems],
@@ -221,7 +215,7 @@ export function MarketsBrowser({
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            items: items.map(({ token, amountRaw }) => ({ token, amountRaw })),
+            items: items.map(({ token }) => ({ token, mode: "benchmark", benchmarkUsd: 10 })),
           }),
           cache: "no-store",
           signal: controller.signal,
@@ -230,7 +224,8 @@ export function MarketsBrowser({
           opportunities?: {
             token: string;
             assessment?: PublicArbitrageAssessment;
-            opportunity: ArbitrageOpportunity;
+            opportunity?: ArbitrageOpportunity;
+            error?: string;
           }[];
           error?: string;
         };
@@ -241,12 +236,14 @@ export function MarketsBrowser({
           const next = { ...current };
           for (const result of payload.opportunities ?? []) {
             const key = `base-${result.token.toLowerCase()}`;
-            next[key] = {
-              status: "loaded",
-              assessment:
-                result.assessment ??
-                assessPublicArbitrageOpportunity(result.opportunity),
-            };
+            if (result.error || (!result.assessment && !result.opportunity)) {
+              next[key] = { status: "unavailable" };
+            } else {
+              next[key] = {
+                status: "loaded",
+                assessment: result.assessment ?? assessPublicArbitrageOpportunity(result.opportunity!),
+              };
+            }
           }
           return next;
         });
@@ -340,8 +337,7 @@ export function MarketsBrowser({
               {markets.map((market) => {
                 const key = `${market.chain}-${market.token.toLowerCase()}`;
                 const preview = arbitragePreviews[key];
-                const benchmarkAmountRaw = oneReserveToken(market.reserveDecimals);
-                const href = `/market/${market.chain}/${market.token}?amountRaw=${benchmarkAmountRaw}`;
+                const href = `/market/${market.chain}/${market.token}`;
                 const prefetch = () => router.prefetch(href);
                 return (
                 <div className="market-row" key={`${market.chain}-${market.token}`}>
@@ -358,10 +354,10 @@ export function MarketsBrowser({
                   <span
                     className="market-number market-arbitrage-preview"
                     data-label="Route check"
-                    title={`A route exists at 1 ${market.reserveSymbol}. Open the market to check gas and execution for your amount.`}
+                    title="Estimated return for exactly $10. Open the market to enter another amount and verify execution."
                   >
                     <strong>{previewLabel(preview)}</strong>
-                    <small>{previewHint(preview, market.reserveSymbol)}</small>
+                    <small>{previewHint(preview)}</small>
                   </span>
                   <Link className="market-buy" href={href} onFocus={prefetch} onMouseEnter={prefetch}>Arbitrage <ArrowRight /></Link>
                 </div>

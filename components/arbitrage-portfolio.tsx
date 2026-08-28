@@ -14,6 +14,7 @@ import { useWallet } from "@/components/wallet-provider";
 import { tokenLogoUrl } from "@/components/token-logo";
 import {
   ARBITRAGE_EXECUTOR_V3_ABI,
+  ARBITRAGE_EXECUTOR_V4_ABI,
   ERC20_PERMISSION_ABI,
 } from "@/lib/arbitrage";
 import { CHAINS } from "@/lib/chains";
@@ -82,7 +83,9 @@ export function ArbitragePortfolio({
     if (!continuous) return [];
     for (const execution of continuous.executions) {
       const strategy = continuous.strategies.find(
-        (item) => item.id === execution.strategyId,
+        (item) =>
+          item.id === execution.strategyId &&
+          item.version === execution.version,
       );
       const market = strategy ? marketFor(markets, strategy.hToken) : undefined;
       const reserveToken = strategy?.reserveToken ?? execution.reserveToken;
@@ -92,15 +95,11 @@ export function ArbitragePortfolio({
         decimals: market?.reserveDecimals ?? 18,
         symbol: market?.reserveSymbol ?? "Reserve",
       };
-      current.raw +=
-        BigInt(execution.ownerProfitReserveRaw) +
-        (execution.executor.toLowerCase() === wallet.toLowerCase()
-          ? BigInt(execution.executorRewardReserveRaw)
-          : 0n);
+      current.raw += BigInt(execution.ownerProfitReserveRaw);
       groups.set(key, current);
     }
     return [...groups.values()];
-  }, [continuous, markets, wallet]);
+  }, [continuous, markets]);
   const totalPnlLabel = totalPnl.length
     ? totalPnl
         .map(
@@ -110,8 +109,12 @@ export function ArbitragePortfolio({
         .join(" · ")
     : "0";
 
-  async function stopContinuous(strategyId: string, reserveToken: Address) {
-    if (!continuous?.executor) return;
+  async function stopContinuous(
+    strategyId: string,
+    reserveToken: Address,
+    executor: Address,
+    version: "v3" | "v4",
+  ) {
     setBusy(true);
     setError("");
     setMessage("");
@@ -120,8 +123,11 @@ export function ArbitragePortfolio({
       const walletClient = await walletState.getWalletClient("base");
       const stopping = await publicClient.simulateContract({
         account: wallet,
-        address: continuous.executor,
-        abi: ARBITRAGE_EXECUTOR_V3_ABI,
+        address: executor,
+        abi:
+          version === "v4"
+            ? ARBITRAGE_EXECUTOR_V4_ABI
+            : ARBITRAGE_EXECUTOR_V3_ABI,
         functionName: "stopStrategy",
         args: [BigInt(strategyId)],
       });
@@ -136,7 +142,7 @@ export function ArbitragePortfolio({
         address: reserveToken,
         abi: ERC20_PERMISSION_ABI,
         functionName: "approve",
-        args: [continuous.executor, 0n],
+        args: [executor, 0n],
       });
       const revokeHash = await walletClient.writeContract(revoke.request);
       const revokeReceipt = await publicClient.waitForTransactionReceipt({
@@ -246,7 +252,12 @@ export function ArbitragePortfolio({
                   <button
                     disabled={busy}
                     onClick={() =>
-                      void stopContinuous(strategy.id, strategy.reserveToken)
+                      void stopContinuous(
+                        strategy.id,
+                        strategy.reserveToken,
+                        strategy.executor,
+                        strategy.version,
+                      )
                     }
                     type="button"
                   >

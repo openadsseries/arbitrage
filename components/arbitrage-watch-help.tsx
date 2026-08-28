@@ -62,9 +62,9 @@ export function arbitrageWatchCopy(reason: string) {
       action: "It resumes automatically after the UTC day changes.",
     };
   }
-  if (reason === "Gas too high." || reason === "Waiting for gas.") {
+  if (reason === "Fees are higher than profit." || reason === "Gas too high." || reason === "Waiting for gas.") {
     return {
-      title: "Waiting for gas",
+      title: "Fees too high",
       meaning:
         "There is profit, but the relay reward is smaller than the gas needed to execute.",
       action:
@@ -78,7 +78,7 @@ export function arbitrageWatchCopy(reason: string) {
       action: "Keep the page open. It retries automatically.",
     };
   }
-  if (reason === "No route now." || reason === "Not executable now.") {
+  if (reason === "No profitable route." || reason === "No route now." || reason === "Not executable now.") {
     return {
       title: "Watching",
       meaning:
@@ -99,7 +99,7 @@ export function arbitrageWatchLabel(reason: string) {
   const title = arbitrageWatchCopy(reason).title;
   if (title === "Relay needs gas") return "Gas needed";
   if (title === "Paused today") return "Paused";
-  if (title === "Waiting for gas") return "Gas wait";
+  if (title === "Fees too high") return "Fees too high";
   if (title === "Network busy") return "Network wait";
   return title;
 }
@@ -109,7 +109,7 @@ export function arbitrageWatchPanelTitle(reason: string) {
   if (title === "Setup needed") return "Setup needed.";
   if (title === "Relay needs gas") return "Relay needs gas.";
   if (title === "Paused today") return "Paused today.";
-  if (title === "Waiting for gas") return "Waiting for gas.";
+  if (title === "Fees too high") return "Fees are higher than profit.";
   return "Watching prices.";
 }
 
@@ -141,7 +141,7 @@ export function ArbitrageWatchHelp({
   const gasUsd = quote && usdAmount(quote.requiredWethRaw, 18, quote.wethUsd);
   const coverage = gasCoverage(quote);
   const meaning =
-    copy.title === "Waiting for gas" && coverage !== null
+    copy.title === "Fees too high" && coverage !== null
       ? `The relay reward covers ${coverage}% of gas, so it waits.`
       : copy.meaning;
   const checkedLabel = checkedAt

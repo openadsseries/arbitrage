@@ -20,19 +20,19 @@ export default async function MarketDetailPage({
   const chainKey = input.chain as ChainKey;
   const detail = await readMarketDetailSnapshot(chainKey, address);
   if (!detail) notFound();
-  const benchmarkAmountRaw = 10n ** BigInt(detail.market.reserveDecimals);
+  const { benchmarkAmountRaw, ...assetDetail } = detail;
   const requestedAmountRaw = Array.isArray(query.amountRaw)
     ? query.amountRaw[0]
     : query.amountRaw;
   const initialAmountRaw =
     requestedAmountRaw && /^\d+$/.test(requestedAmountRaw) &&
-    BigInt(requestedAmountRaw) === benchmarkAmountRaw
+    BigInt(requestedAmountRaw) > 0n && BigInt(requestedAmountRaw) < (1n << 128n)
       ? requestedAmountRaw
-      : benchmarkAmountRaw.toString();
+      : benchmarkAmountRaw;
   return (
     <div className="inner-page page-shell market-detail-page">
       <Link href="/markets" className="back-link"><ArrowLeft /> Markets</Link>
-      <MarketAssetDetail {...detail} initialAmountRaw={initialAmountRaw} />
+      <MarketAssetDetail {...assetDetail} initialAmountRaw={initialAmountRaw} />
     </div>
   );
 }

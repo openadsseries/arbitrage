@@ -18,7 +18,7 @@ export function compactActionError(reason: unknown, fallback: string) {
     if (/over rate limit|rate.?limit|too many requests|429|defined limit|base rpc is busy/i.test(message)) {
       return "Base is busy. Try again soon.";
     }
-    if (/not executable now/i.test(message)) return "No route now.";
+    if (/not executable now|no profitable route/i.test(message)) return "No profitable route.";
     if (/rpc request failed|http request failed|failed to fetch|network request|raw call arguments|contract call|request body|url:/i.test(message)) {
       return "Base read failed. Try again.";
     }

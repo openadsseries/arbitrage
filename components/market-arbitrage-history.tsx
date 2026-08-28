@@ -12,6 +12,7 @@ import { useWallet } from "@/components/wallet-provider";
 import { tokenLogoUrl } from "@/components/token-logo";
 import {
   ARBITRAGE_EXECUTOR_V3_ABI,
+  ARBITRAGE_EXECUTOR_V4_ABI,
   ERC20_PERMISSION_ABI,
   type ContinuousArbitrageExecution,
   type ContinuousArbitrageSnapshot,
@@ -72,13 +73,18 @@ export function MarketArbitrageHistory({
     [market.token, snapshot?.strategies],
   );
   const strategyIds = useMemo(
-    () => new Set(marketStrategies.map((strategy) => strategy.id)),
+    () =>
+      new Set(
+        marketStrategies.map(
+          (strategy) => `${strategy.version}:${strategy.id}`,
+        ),
+      ),
     [marketStrategies],
   );
   const marketExecutions = useMemo(
     () =>
       snapshot?.executions.filter((execution) =>
-        strategyIds.has(execution.strategyId),
+        strategyIds.has(`${execution.version}:${execution.strategyId}`),
       ) ?? [],
     [snapshot?.executions, strategyIds],
   );
@@ -93,18 +99,16 @@ export function MarketArbitrageHistory({
   const activeExecutions = useMemo(
     () =>
       marketExecutions.filter(
-        (execution) => execution.strategyId === activeStrategy?.id,
+        (execution) =>
+          execution.strategyId === activeStrategy?.id &&
+          execution.version === activeStrategy?.version,
       ),
-    [activeStrategy?.id, marketExecutions],
+    [activeStrategy?.id, activeStrategy?.version, marketExecutions],
   );
   const walletProfitRaw = useCallback(
     (execution: ContinuousArbitrageExecution) =>
-      BigInt(execution.ownerProfitReserveRaw) +
-      (wallet.address &&
-      execution.executor.toLowerCase() === wallet.address.toLowerCase()
-        ? BigInt(execution.executorRewardReserveRaw)
-        : 0n),
-    [wallet.address],
+      BigInt(execution.ownerProfitReserveRaw),
+    [],
   );
   const activePnlRaw = activeExecutions.reduce(
     (total, execution) => total + walletProfitRaw(execution),
@@ -113,16 +117,19 @@ export function MarketArbitrageHistory({
   const activeStatus = arbitrageWatchLabel(watchReason ?? "");
 
   async function stop(strategy: ContinuousArbitrageStrategy) {
-    if (!wallet.address || !snapshot?.executor) return;
-    setBusy(strategy.id);
+    if (!wallet.address) return;
+    setBusy(`${strategy.version}:${strategy.id}`);
     setError("");
     try {
       const publicClient = await wallet.getPublicClient("base");
       const walletClient = await wallet.getWalletClient("base");
       const stopRequest = await publicClient.simulateContract({
         account: wallet.address,
-        address: snapshot.executor,
-        abi: ARBITRAGE_EXECUTOR_V3_ABI,
+        address: strategy.executor,
+        abi:
+          strategy.version === "v4"
+            ? ARBITRAGE_EXECUTOR_V4_ABI
+            : ARBITRAGE_EXECUTOR_V3_ABI,
         functionName: "stopStrategy",
         args: [BigInt(strategy.id)],
       });
@@ -137,7 +144,7 @@ export function MarketArbitrageHistory({
         address: strategy.reserveToken,
         abi: ERC20_PERMISSION_ABI,
         functionName: "approve",
-        args: [snapshot.executor, 0n],
+        args: [strategy.executor, 0n],
       });
       const revokeHash = await walletClient.writeContract(
         revokeRequest.request,

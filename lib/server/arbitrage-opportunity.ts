@@ -4,15 +4,19 @@ import { BOND_ABI, ERC20_ABI, binaryReverseMint, mintclub } from "@mint.club/v2-
 import { formatUnits, parseAbi, type Address } from "viem";
 import {
   ARBITRAGE_EXECUTOR_V3_ABI,
+  ARBITRAGE_EXECUTOR_V4_ABI,
   calculateArbitrageRoute,
-  getArbitrageCurveAmounts,
   getArbitrageExecutorV3,
+  getArbitrageExecutorV4,
+  getArbitrageQuoteAmounts,
+  reserveAmountForUsdBenchmark,
   selectBestArbitrageSample,
   type ArbitrageOpportunity,
+  type ArbitrageQuoteMode,
 } from "@/lib/arbitrage";
 import { CHAINS } from "@/lib/chains";
 import type { VerifiedMarket } from "@/lib/onchain-types";
-import { readTokenMarketPrice } from "@/lib/server/gecko-market";
+import { readTokenMarketPrice, type TokenMarketPrice } from "@/lib/server/gecko-market";
 import { readVerifiedMarket } from "@/lib/server/markets";
 
 const ONCHAIN_ROUTER = "0xCa7a19BD1E260DCd92B17DdAc068C2bF67539a02" as const;
@@ -63,22 +67,58 @@ function priceBasis(input: {
 export async function readArbitrageOpportunity(
   hToken: Address,
   checkedAmount: bigint,
+  options: { mode?: ArbitrageQuoteMode } = {},
 ): Promise<ArbitrageOpportunity> {
   if (checkedAmount <= 0n) throw new Error("Enter an original token amount greater than zero.");
   const market = await readVerifiedMarket("base", hToken);
   if (!market) throw new Error("This Hyped Token was not found in Mint Club on Base.");
 
-  return readArbitrageOpportunityForMarket(market, checkedAmount);
+  return readArbitrageOpportunityForMarket(market, checkedAmount, options);
+}
+
+export async function readArbitrageBenchmarkOpportunity(
+  hToken: Address,
+  benchmarkUsd = 10,
+): Promise<ArbitrageOpportunity> {
+  const market = await readVerifiedMarket("base", hToken);
+  if (!market) throw new Error("This Hyped Token was not found in Mint Club on Base.");
+  return readArbitrageBenchmarkOpportunityForMarket(market, benchmarkUsd);
+}
+
+export async function readArbitrageBenchmarkOpportunityForMarket(
+  market: VerifiedMarket,
+  benchmarkUsd = 10,
+): Promise<ArbitrageOpportunity> {
+  const reservePrice = await readTokenMarketPrice("base", market.reserveToken, { fresh: true });
+  if (!reservePrice) throw new Error("Reserve Token USD price is unavailable.");
+  const checkedAmount = reserveAmountForUsdBenchmark({
+    benchmarkUsd,
+    reserveUsd: reservePrice.usd,
+    reserveDecimals: market.reserveDecimals,
+  });
+  return readArbitrageOpportunityForMarket(market, checkedAmount, {
+    mode: "exact",
+    benchmarkUsd,
+    reservePrice,
+  });
 }
 
 export async function readArbitrageOpportunityForMarket(
   market: VerifiedMarket,
   checkedAmount: bigint,
+  options: {
+    mode?: ArbitrageQuoteMode;
+    benchmarkUsd?: number | null;
+    reservePrice?: TokenMarketPrice | null;
+  } = {},
 ): Promise<ArbitrageOpportunity> {
   if (checkedAmount <= 0n) throw new Error("Enter an original token amount greater than zero.");
   if (market.chain !== "base") throw new Error("Arbitrage is available on Base first.");
 
-  const executor = getArbitrageExecutorV3("base");
+  const useV4 = process.env.NEXT_PUBLIC_ARBITRAGE_V4_ENABLED === "true";
+  const executor = useV4
+    ? getArbitrageExecutorV4("base")
+    : getArbitrageExecutorV3("base");
   if (!executor) throw new Error("Continuous arbitrage is not configured on Base.");
 
   const client = mintclub.network("base").getPublicClient();
@@ -87,7 +127,36 @@ export async function readArbitrageOpportunityForMarket(
     throw new Error("This market does not have a separate original token route.");
   }
 
-  const [bondSteps, currentSupply, protocolFeeBps, executorRewardBps, reservePrice] = await Promise.all([
+  const feePolicy = useV4
+    ? Promise.all([
+        client.readContract({
+          address: executor,
+          abi: ARBITRAGE_EXECUTOR_V4_ABI,
+          functionName: "protocolFeeBps",
+          blockNumber: readBlock,
+        }),
+        client.readContract({
+          address: executor,
+          abi: ARBITRAGE_EXECUTOR_V4_ABI,
+          functionName: "executorProfitShareBps",
+          blockNumber: readBlock,
+        }),
+      ])
+    : Promise.all([
+        client.readContract({
+          address: executor,
+          abi: ARBITRAGE_EXECUTOR_V3_ABI,
+          functionName: "protocolFeeBps",
+          blockNumber: readBlock,
+        }),
+        client.readContract({
+          address: executor,
+          abi: ARBITRAGE_EXECUTOR_V3_ABI,
+          functionName: "executorRewardBps",
+          blockNumber: readBlock,
+        }),
+      ]);
+  const [bondSteps, currentSupply, [protocolFeeBps, executorRewardBps], reservePrice] = await Promise.all([
     client.readContract({
       address: CHAINS.base.mintClubBond,
       abi: BOND_ABI,
@@ -101,22 +170,14 @@ export async function readArbitrageOpportunityForMarket(
       functionName: "totalSupply",
       blockNumber: readBlock,
     }),
-    client.readContract({
-      address: executor,
-      abi: ARBITRAGE_EXECUTOR_V3_ABI,
-      functionName: "protocolFeeBps",
-      blockNumber: readBlock,
-    }),
-    client.readContract({
-      address: executor,
-      abi: ARBITRAGE_EXECUTOR_V3_ABI,
-      functionName: "executorRewardBps",
-      blockNumber: readBlock,
-    }),
-    readTokenMarketPrice("base", market.reserveToken, { fresh: true }),
+    feePolicy,
+    options.reservePrice === undefined
+      ? readTokenMarketPrice("base", market.reserveToken, { fresh: true })
+      : Promise.resolve(options.reservePrice),
   ]);
 
-  const curveAmounts = getArbitrageCurveAmounts(checkedAmount);
+  const quoteMode = options.mode ?? "optimize";
+  const curveAmounts = getArbitrageQuoteAmounts(checkedAmount, quoteMode);
   const mintEntries = curveAmounts.flatMap((reserveBudget, index) => {
     try {
       const hAmount = binaryReverseMint({
@@ -277,6 +338,8 @@ export async function readArbitrageOpportunityForMarket(
     reserveToken: market.reserveToken,
     reserveSymbol: market.reserveSymbol,
     reserveDecimals: market.reserveDecimals,
+    quoteMode,
+    benchmarkUsd: options.benchmarkUsd ?? null,
     checkedAmountRaw: checkedAmount.toString(),
     hAmountRaw: selectedSample?.hAmountRaw ?? "0",
     protocolFeeBps: Number(protocolFeeBps),

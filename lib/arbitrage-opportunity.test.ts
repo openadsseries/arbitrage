@@ -3,13 +3,20 @@ import {
   assessPublicArbitrageOpportunity,
   calculateArbitrageRoute,
   getArbitrageCurveAmounts,
+  getArbitrageQuoteAmounts,
   getArbitrageMinimumProfit,
   getArbitrageRepeatLimit,
+  reserveAmountForUsdBenchmark,
   selectBestArbitrageSample,
   selectDisplayedArbitrageRoute,
 } from "./arbitrage";
 
 describe("arbitrage opportunity math", () => {
+  it("never changes an exact quote amount", () => {
+    expect(getArbitrageQuoteAmounts(10_000n, "exact")).toEqual([10_000n]);
+    expect(getArbitrageQuoteAmounts(10_000n, "optimize").length).toBeGreaterThan(1);
+  });
+
   it("reports the user's net only after protocol and executor shares", () => {
     const route = calculateArbitrageRoute({
       direction: "Mint then sell",
@@ -75,6 +82,19 @@ describe("arbitrage opportunity math", () => {
     expect(getArbitrageRepeatLimit(10n, 500n)).toBe(100n);
     expect(getArbitrageRepeatLimit(10n, 73n)).toBe(73n);
     expect(getArbitrageRepeatLimit(0n, 100n)).toBe(0n);
+  });
+
+  it("converts the shared USD benchmark into the Reserve Token amount", () => {
+    expect(reserveAmountForUsdBenchmark({
+      benchmarkUsd: 10,
+      reserveUsd: 0.0004,
+      reserveDecimals: 8,
+    })).toBe(2_500_000_000_000n);
+    expect(reserveAmountForUsdBenchmark({
+      benchmarkUsd: 10,
+      reserveUsd: 2.5,
+      reserveDecimals: 18,
+    })).toBe(4_000_000_000_000_000_000n);
   });
 
   it("keeps a smaller profitable size when the full budget loses to price impact", () => {
@@ -143,6 +163,8 @@ describe("arbitrage opportunity math", () => {
       reserveToken: "0x0000000000000000000000000000000000000002",
       reserveSymbol: "BNKR",
       reserveDecimals: 8,
+      quoteMode: "exact",
+      benchmarkUsd: 10,
       checkedAmountRaw: "100000000",
       hAmountRaw: "647604546",
       protocolFeeBps: 0,
@@ -160,9 +182,11 @@ describe("arbitrage opportunity math", () => {
       quotedAt: 1,
     });
 
-    expect(assessment.stage).toBe("price-gap");
+    expect(assessment.stage).toBe("estimated-return");
     expect(assessment.gapBps).toBe(9_932);
-    expect(assessment.gasChecked).toBe(false);
+    expect(assessment.quoteMode).toBe("exact");
+    expect(assessment.benchmarkUsd).toBe(10);
+    expect(assessment.verification).toBe("estimated");
     expect(assessment).not.toHaveProperty("ready");
     expect(assessment).not.toHaveProperty("positive");
   });

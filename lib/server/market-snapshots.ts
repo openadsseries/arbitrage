@@ -6,7 +6,7 @@ import type { ArbitrageMarketReadiness, ArbitrageOpportunity } from "@/lib/arbit
 import type { ChainKey } from "@/lib/chains";
 import type { VerifiedMarket } from "@/lib/onchain-types";
 import { readArbitrageMarketReadinessForMarket } from "@/lib/server/arbitrage";
-import { readArbitrageOpportunityForMarket } from "@/lib/server/arbitrage-opportunity";
+import { readArbitrageBenchmarkOpportunityForMarket } from "@/lib/server/arbitrage-opportunity";
 import { readMarketComparison, type MarketComparisonState } from "@/lib/server/gecko-comparison";
 import { readVerifiedMarket, readVerifiedMarkets } from "@/lib/server/markets";
 
@@ -22,6 +22,7 @@ export type MarketDetailSnapshot = {
   arbitrageReadiness: ArbitrageMarketReadiness | null;
   marketComparison: MarketComparisonState;
   initialOpportunity: ArbitrageOpportunity | null;
+  benchmarkAmountRaw: string;
 };
 
 async function comparisonForMarket(
@@ -72,18 +73,18 @@ const readMarketDetailCore = unstable_cache(
         market,
         arbitrageReadiness: null,
         initialOpportunity: null,
+        benchmarkAmountRaw: (10n ** BigInt(market.reserveDecimals)).toString(),
       };
     }
 
     const arbitrageReadiness = await readArbitrageMarketReadinessForMarket(market).catch(() => null);
-    const initialOpportunity = await readArbitrageOpportunityForMarket(
-      market,
-      10n ** BigInt(market.reserveDecimals),
-    ).catch(() => null);
+    const initialOpportunity = await readArbitrageBenchmarkOpportunityForMarket(market).catch(() => null);
+    const benchmarkAmountRaw = initialOpportunity?.checkedAmountRaw
+      ?? (10n ** BigInt(market.reserveDecimals)).toString();
 
-    return { market, arbitrageReadiness, initialOpportunity };
+    return { market, arbitrageReadiness, initialOpportunity, benchmarkAmountRaw };
   },
-  ["market-detail-core-v3"],
+  ["market-detail-core-v4"],
   { revalidate: 15 },
 );
 

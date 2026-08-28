@@ -67,7 +67,7 @@ export function readContinuousArbitrageSnapshot(
   }
 
   publish(entry, { ...entry.state, loading: !entry.state.snapshot, error: "" });
-  const request = fetch(`/api/arbitrage/v3?wallet=${address}`, {
+  const request = fetch(`/api/arbitrage/snapshot?wallet=${address}`, {
     cache: "no-store",
   })
     .then(async (response) => {

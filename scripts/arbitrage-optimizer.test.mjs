@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { maximizeExecutable } from "./arbitrage-optimizer.mjs";
+import { maximizeExecutable } from "../lib/arbitrage-optimizer.mjs";
 
 describe("bounded arbitrage amount search", () => {
   it("finds a profitable interior size instead of defaulting to the cap", async () => {
@@ -12,6 +12,19 @@ describe("bounded arbitrage amount search", () => {
     expect(result).not.toBeNull();
     expect(result.amount).toBeGreaterThanOrEqual(340n);
     expect(result.amount).toBeLessThanOrEqual(400n);
+  });
+
+  it("crosses a losing sample range to find a narrow profitable band", async () => {
+    const optimum = 400n;
+    const result = await maximizeExecutable(1_000n, async (amount) => {
+      const distance = amount > optimum ? amount - optimum : optimum - amount;
+      return { amount, net: 8n - distance };
+    });
+
+    expect(result).not.toBeNull();
+    expect(result.net).toBeGreaterThan(0n);
+    expect(result.amount).toBeGreaterThanOrEqual(392n);
+    expect(result.amount).toBeLessThanOrEqual(408n);
   });
 
   it("checks small permissions and ignores failed quotes", async () => {
@@ -30,4 +43,3 @@ describe("bounded arbitrage amount search", () => {
     expect(result).toBeNull();
   });
 });
-

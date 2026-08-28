@@ -11,7 +11,12 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { base } from "viem/chains";
 import { estimateContractTotalFee } from "viem/op-stack";
-import { maximizeExecutable } from "./arbitrage-optimizer.mjs";
+import { maximizeExecutable } from "../lib/arbitrage-optimizer.mjs";
+import {
+  calculateV3ProfitSplit,
+  estimateV3ExecutorRewardFromOwnerProfit,
+  rewardCoversExecutionFee,
+} from "../lib/arbitrage-economics.mjs";
 
 const WETH = "0x4200000000000000000000000000000000000006";
 const BOND = "0xc5a076cad94176c2996B32d8466Be1cE757FAa27";
@@ -79,14 +84,6 @@ function wait(milliseconds) {
 
 function down(amount) {
   return (amount * (BPS - SLIPPAGE_BPS)) / BPS;
-}
-
-function ownerProfit(grossProfit, protocolFeeBps, executorRewardBps) {
-  return (
-    grossProfit -
-    (grossProfit * BigInt(protocolFeeBps)) / BPS -
-    (grossProfit * BigInt(executorRewardBps)) / BPS
-  );
 }
 
 async function quoteExactInput(tokenIn, tokenOut, amountIn) {
@@ -180,13 +177,11 @@ async function mintThenSell(
     strategy.reserveToken,
     wethOut,
   );
-  if (reserveOut <= reserveRequired) return null;
-  const net = ownerProfit(
+  const net = calculateV3ProfitSplit(
     reserveOut - reserveRequired,
     protocolFeeBps,
     rewardBps,
-  );
-  if (net < strategy.minProfitReserve) return null;
+  ).ownerProfit;
   return {
     direction: 0,
     amount: reserveRequired,
@@ -212,9 +207,11 @@ async function buyThenRedeem(strategy, budget, protocolFeeBps, rewardBps) {
     args: [strategy.hToken, hOut],
     blockTag: "pending",
   });
-  if (reserveOut <= budget) return null;
-  const net = ownerProfit(reserveOut - budget, protocolFeeBps, rewardBps);
-  if (net < strategy.minProfitReserve) return null;
+  const net = calculateV3ProfitSplit(
+    reserveOut - budget,
+    protocolFeeBps,
+    rewardBps,
+  ).ownerProfit;
   return {
     direction: 1,
     amount: budget,
@@ -247,6 +244,10 @@ async function bestCandidates(strategy, available, protocolFeeBps, rewardBps) {
   ]);
   return [mintCandidate, redeemCandidate]
     .filter(Boolean)
+    .filter(
+      (candidate) =>
+        candidate.net > 0n && candidate.net >= strategy.minProfitReserve,
+    )
     .sort((left, right) =>
       left.net > right.net ? -1 : left.net < right.net ? 1 : 0,
     );
@@ -313,18 +314,17 @@ async function tryExecute(strategyId, strategy, protocolFeeBps, rewardBps) {
           ? simulation.result - candidate.amount
           : 0n;
       if (simulatedOwnerProfit < strategy.minProfitReserve) continue;
-      const ownerShareBps = BPS - BigInt(protocolFeeBps) - BigInt(rewardBps);
-      const expectedRewardReserve =
-        ownerShareBps > 0n
-          ? (simulatedOwnerProfit * BigInt(rewardBps)) / ownerShareBps
-          : 0n;
+      const expectedRewardReserve = estimateV3ExecutorRewardFromOwnerProfit(
+        simulatedOwnerProfit,
+        protocolFeeBps,
+        rewardBps,
+      );
       const rewardWeth = await quoteExactInput(
         strategy.reserveToken,
         WETH,
         expectedRewardReserve,
       ).catch(() => 0n);
-      const requiredGasCover = (totalFee * GAS_MARGIN_BPS) / BPS;
-      if (rewardWeth < requiredGasCover) continue;
+      if (!rewardCoversExecutionFee(rewardWeth, totalFee, GAS_MARGIN_BPS)) continue;
 
       const hash = await wallet.writeContract(simulation.request);
       const receipt = await client.waitForTransactionReceipt({ hash });

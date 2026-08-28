@@ -28,7 +28,7 @@ Do not include live private keys, seed phrases or unrestricted API credentials.
 
 ## Contract boundaries
 
-`HypedArbitrageExecutorV3` is immutable and has no owner, guardian, upgrade, arbitrary-call or withdrawal surface. It receives user funds only during an atomic execution and must return the Reserve Token principal plus the protected result in that transaction.
+`HypedArbitrageExecutorV3` is immutable and has no owner, privileged pause role, upgrade, arbitrary-call or withdrawal surface. It receives user funds only during an atomic execution and must return the Reserve Token principal plus the protected result in that transaction.
 
 Before increasing production limits:
 

@@ -19,11 +19,15 @@ import {
 import { useWallet } from "@/components/wallet-provider";
 import {
   ARBITRAGE_EXECUTOR_V3_ABI,
+  ARBITRAGE_EXECUTOR_V4_ABI,
+  ARBITRAGE_V4_MIN_NET_RETURN_BPS,
   ERC20_PERMISSION_ABI,
+  getArbitrageMaxFeeReimbursement,
   getArbitrageMinimumProfit,
   getArbitrageRepeatLimit,
   selectBestOpportunityRoute,
   type ArbitrageMarketReadiness,
+  type ArbitrageExecutionReasonCode,
   type ArbitrageOpportunity,
   type ContinuousArbitrageSnapshot,
   type DirectArbitrageExecutionQuote,
@@ -50,6 +54,7 @@ type Preparation = {
 };
 type RelayPayload = {
   status?: "executed" | "ready" | "waiting-gas" | "none";
+  code?: ArbitrageExecutionReasonCode;
   hash?: `0x${string}`;
   execution?: DirectArbitrageExecutionQuote | null;
   error?: string;
@@ -83,6 +88,8 @@ const AUTO_REPEAT_COUNT = 10n;
 const PASSIVE_WATCH_REASONS = new Set([
   "Base is busy. Try again soon.",
   "Gas too high.",
+  "Fees are higher than profit.",
+  "No profitable route.",
   "Not executable now.",
   "No route now.",
   "Waiting for gas.",
@@ -99,9 +106,12 @@ function watchDelay(reason: string) {
 
 function relayWatchReason(reason: unknown) {
   if (reason instanceof RelayRequestError) {
-    if (reason.payload.status === "waiting-gas") return "Gas too high.";
-    if (reason.payload.status === "none")
-      return errorMessage(reason.payload.error, "No route now.");
+    if (reason.payload.code === "fees-higher-than-profit")
+      return "Fees are higher than profit.";
+    if (reason.payload.code === "no-profitable-route")
+      return "No profitable route.";
+    if (reason.payload.code === "no-permission") return "No available amount.";
+    if (reason.payload.status === "none") return errorMessage(reason.payload.error, "Watching.");
     return errorMessage(reason.payload.error, "Watching.");
   }
   return errorMessage(reason, "Watching.");
@@ -358,18 +368,14 @@ export function MarketAutomationPanel({
   const runningExecutions = useMemo(
     () =>
       activeSnapshot?.executions.filter(
-        (execution) => execution.strategyId === running?.id,
+        (execution) =>
+          execution.strategyId === running?.id &&
+          execution.version === running?.version,
       ) ?? [],
-    [activeSnapshot, running?.id],
+    [activeSnapshot, running?.id, running?.version],
   );
   const totalProfitRaw = runningExecutions.reduce(
-    (total, execution) =>
-      total +
-      BigInt(execution.ownerProfitReserveRaw) +
-      (wallet.address &&
-      execution.executor.toLowerCase() === wallet.address.toLowerCase()
-        ? BigInt(execution.executorRewardReserveRaw)
-        : 0n),
+    (total, execution) => total + BigInt(execution.ownerProfitReserveRaw),
     0n,
   );
   const relayReason = relayStatus?.ready === false ? relayStatus.message : "";
@@ -429,11 +435,11 @@ export function MarketAutomationPanel({
     onWatchReasonChange?.(effectiveWatchReason);
   }, [effectiveWatchReason, onWatchReasonChange]);
   const relayStrategy = useCallback(
-    async (address: Address, strategyId: string) => {
+    async (address: Address, strategyId: string, version: "v3" | "v4") => {
       const response = await fetch("/api/arbitrage/relay", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ owner: address, strategyId }),
+        body: JSON.stringify({ owner: address, strategyId, version }),
       });
       const payload = (await response.json()) as RelayPayload;
       if (!response.ok || !payload.hash)
@@ -502,12 +508,12 @@ export function MarketAutomationPanel({
       onWatchCheckedAtChange?.(checkedAt);
       if (!shouldProbe) {
         if (watchQuoteReadyRef.current && !watchRouteRef.current) {
-          setWatchReason("No route now.");
+          setWatchReason("No profitable route.");
           setLastRelayQuote(null);
           onActiveQuoteChange?.(null);
         } else if (watchRouteRef.current) {
           setWatchReason((current) =>
-            current === "No route now." ? "" : current,
+            current === "No profitable route." ? "" : current,
           );
         }
         schedule();
@@ -515,7 +521,11 @@ export function MarketAutomationPanel({
       }
       relayInFlight.current = true;
       try {
-        const payload = await relayStrategy(wallet.address!, running.id);
+        const payload = await relayStrategy(
+          wallet.address!,
+          running.id,
+          running.version,
+        );
         const quote = payload.execution ?? null;
         setLastRelayQuote(quote);
         onActiveQuoteChange?.(quote);
@@ -597,8 +607,12 @@ export function MarketAutomationPanel({
         wallet.address && activeSnapshot
           ? activeSnapshot
           : await readContinuousArbitrageSnapshot(address);
-      if (!currentSnapshot.configured || !currentSnapshot.executor)
-        throw new Error("Arbitrage is not available yet.");
+      if (
+        !currentSnapshot.configured ||
+        !currentSnapshot.executor ||
+        currentSnapshot.writeVersion !== "v4"
+      )
+        throw new Error("V4 setup is not ready yet.");
 
       const publicClient = await wallet.getPublicClient("base");
       const walletClient = await wallet.getWalletClient("base");
@@ -624,16 +638,20 @@ export function MarketAutomationPanel({
         AUTO_REPEAT_COUNT,
       );
       const validUntil = 0;
+      const maximumFeeReimbursementRaw =
+        getArbitrageMaxFeeReimbursement(budgetRaw);
       const startCall = {
         to: currentSnapshot.executor,
         data: encodeFunctionData({
-          abi: ARBITRAGE_EXECUTOR_V3_ABI,
+          abi: ARBITRAGE_EXECUTOR_V4_ABI,
           functionName: "startStrategy",
           args: [
             market.token,
             budgetRaw,
             totalLimitRaw,
             minimumProfitRaw,
+            ARBITRAGE_V4_MIN_NET_RETURN_BPS,
+            maximumFeeReimbursementRaw,
             validUntil,
           ],
         }),
@@ -711,13 +729,15 @@ export function MarketAutomationPanel({
         const request = await publicClient.simulateContract({
           account: address,
           address: currentSnapshot.executor,
-          abi: ARBITRAGE_EXECUTOR_V3_ABI,
+          abi: ARBITRAGE_EXECUTOR_V4_ABI,
           functionName: "startStrategy",
           args: [
             market.token,
             budgetRaw,
             totalLimitRaw,
             minimumProfitRaw,
+            ARBITRAGE_V4_MIN_NET_RETURN_BPS,
+            maximumFeeReimbursementRaw,
             validUntil,
           ],
         });
@@ -729,16 +749,20 @@ export function MarketAutomationPanel({
       setShowRevoke(false);
       const strategyId = await publicClient.readContract({
         address: currentSnapshot.executor,
-        abi: ARBITRAGE_EXECUTOR_V3_ABI,
+        abi: ARBITRAGE_EXECUTOR_V4_ABI,
         functionName: "activeStrategyId",
-        args: [address, preparation.reserveToken],
+        args: [address, market.token],
         blockTag: "pending",
       });
       if (strategyId === 0n) throw new Error("Position not found.");
       let executed = false;
       try {
         setProgress("Execute");
-        const payload = await relayStrategy(address, strategyId.toString());
+        const payload = await relayStrategy(
+          address,
+          strategyId.toString(),
+          "v4",
+        );
         const quote = payload.execution ?? null;
         setLastRelayQuote(quote);
         onActiveQuoteChange?.(quote);
@@ -778,7 +802,6 @@ export function MarketAutomationPanel({
   async function stopAndRevoke() {
     if (
       !wallet.address ||
-      !activeSnapshot?.executor ||
       !running ||
       !preparation
     )
@@ -790,16 +813,21 @@ export function MarketAutomationPanel({
     try {
       const publicClient = await wallet.getPublicClient("base");
       const walletClient = await wallet.getWalletClient("base");
+      const strategyExecutor = running.executor;
+      const strategyAbi =
+        running.version === "v4"
+          ? ARBITRAGE_EXECUTOR_V4_ABI
+          : ARBITRAGE_EXECUTOR_V3_ABI;
       const currentAllowance = await publicClient.readContract({
         address: preparation.reserveToken,
         abi: ERC20_PERMISSION_ABI,
         functionName: "allowance",
-        args: [wallet.address, activeSnapshot.executor],
+        args: [wallet.address, strategyExecutor],
       });
       const stopCall = {
-        to: activeSnapshot.executor,
+        to: strategyExecutor,
         data: encodeFunctionData({
-          abi: ARBITRAGE_EXECUTOR_V3_ABI,
+          abi: strategyAbi,
           functionName: "stopStrategy",
           args: [BigInt(running.id)],
         }),
@@ -809,7 +837,7 @@ export function MarketAutomationPanel({
         data: encodeFunctionData({
           abi: ERC20_PERMISSION_ABI,
           functionName: "approve",
-          args: [activeSnapshot.executor, 0n],
+          args: [strategyExecutor, 0n],
         }),
       } as const;
       const calls =

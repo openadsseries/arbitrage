@@ -41,8 +41,8 @@ export function buildArbitrageRouteChecks({
   const routePositive = Boolean(
     route?.netPositive && BigInt(route.ownerDifferenceRaw) > 0n,
   );
-  const gasWaiting = includesReason(reason, ["Gas too high", "Waiting for gas"]);
-  const routeWaiting = includesReason(reason, ["No route", "Not executable"]);
+  const gasWaiting = includesReason(reason, ["Fees are higher than profit", "Gas too high", "Waiting for gas"]);
+  const routeWaiting = includesReason(reason, ["No profitable route", "No route", "Not executable"]);
   const networkWaiting = reason.includes("Base is busy");
   const setupBlocked = includesReason(reason, [
     "Relay setup needed",
@@ -50,16 +50,19 @@ export function buildArbitrageRouteChecks({
     "Relay needs Base ETH",
   ]);
   const quoteCoversGas = Boolean(
-    quote && BigInt(quote.rewardWethRaw) >= BigInt(quote.requiredWethRaw),
+    quote &&
+      (quote.version === "v4"
+        ? BigInt(quote.expectedOwnerProfitRaw) > 0n
+        : BigInt(quote.rewardWethRaw) >= BigInt(quote.requiredWethRaw)),
   );
 
   const costs: ArbitrageRouteCheck = gasWaiting
     ? {
         key: "costs",
         label: "Costs",
-        value: "Gas high",
+        value: "Fees too high",
         tone: "waiting",
-        detail: "The route is profitable, but gas is not covered yet.",
+        detail: "The estimated fees are higher than the current profit.",
       }
     : quoteCoversGas
       ? {

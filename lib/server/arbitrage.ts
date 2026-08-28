@@ -5,6 +5,7 @@ import { encodeAbiParameters, getAddress, keccak256, parseAbi, zeroAddress, type
 import {
   ARBITRAGE_EXECUTOR_ABI,
   getArbitrageExecutorV3,
+  getArbitrageExecutorV4,
   getArbitrageDeploymentBlock,
   getArbitrageExecutor,
   type ArbitrageExecution,
@@ -213,7 +214,10 @@ export async function readArbitrageMarketReadinessForMarket(
   if (market.chain !== "base") throw new Error("Arbitrage is available on Base first.");
   const client = publicClient("base");
 
-  const executor = getArbitrageExecutorV3("base");
+  const useV4 = process.env.NEXT_PUBLIC_ARBITRAGE_V4_ENABLED === "true";
+  const executor = useV4
+    ? getArbitrageExecutorV4("base")
+    : getArbitrageExecutorV3("base");
   const [originalMarket, hypedExecutableMarket, executorCode] = await Promise.all([
     readExecutableMarket(client, market.reserveToken, null),
     readExecutableMarket(client, market.token, market.directMarket?.reference ?? null),

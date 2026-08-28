@@ -257,7 +257,7 @@ contracts/DEPLOYMENT.md  Verified contract deployment record
 
 ## Security model
 
-The V3 executor has no owner, guardian, upgrade function, arbitrary external call or withdrawal function. It stores no user funds between executions. The user grants a bounded Reserve Token allowance and can stop the strategy at any time.
+The V3 executor has no owner, privileged pause role, upgrade function, arbitrary external call or withdrawal function. It stores no user funds between executions. The user grants a bounded Reserve Token allowance and can stop the strategy at any time.
 
 Important boundaries:
 

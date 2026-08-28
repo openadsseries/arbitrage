@@ -35,6 +35,7 @@ export async function GET(request: Request) {
     const opportunity = await readCachedArbitrageOpportunity(
       getAddress(input.token),
       input.amountRaw,
+      "exact",
     );
     return Response.json(
       { opportunity },

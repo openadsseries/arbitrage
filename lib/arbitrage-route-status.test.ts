@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { buildArbitrageRouteChecks } from "./arbitrage-route-status";
-import type { ArbitrageMarketReadiness, ArbitrageOpportunity } from "./arbitrage";
+import type {
+  ArbitrageMarketReadiness,
+  ArbitrageOpportunity,
+  DirectArbitrageExecutionQuote,
+} from "./arbitrage";
 
 const readiness = {
   ready: true,
@@ -27,14 +31,14 @@ describe("buildArbitrageRouteChecks", () => {
       opportunity,
       reserveBalanceRaw: "100",
       active: true,
-      reason: "Gas too high.",
+      reason: "Fees are higher than profit.",
       quote: null,
     });
 
     expect(checks.map((check) => check.value)).toEqual([
       "Backed",
       "Live",
-      "Gas high",
+      "Fees too high",
       "On",
     ]);
   });
@@ -76,5 +80,24 @@ describe("buildArbitrageRouteChecks", () => {
     });
 
     expect(checks[1]).toMatchObject({ value: "Live", tone: "ready" });
+  });
+
+  it("uses protected owner profit for a V4 fee-covered quote", () => {
+    const quote = {
+      version: "v4",
+      expectedOwnerProfitRaw: "10",
+      rewardWethRaw: "1",
+      requiredWethRaw: "2",
+    } as DirectArbitrageExecutionQuote;
+    const checks = buildArbitrageRouteChecks({
+      readiness,
+      opportunity,
+      reserveBalanceRaw: "100",
+      active: false,
+      reason: "",
+      quote,
+    });
+
+    expect(checks[2]).toMatchObject({ value: "Covered", tone: "ready" });
   });
 });

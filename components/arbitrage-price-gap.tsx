@@ -557,9 +557,10 @@ export function ArbitragePriceGap({
   const headline = (() => {
     if (active && netPositive && route)
       return `+${((route.netReturnBps ?? route.gapBps) / 100).toFixed(2)}% price gap`;
-    if (!active && netPositive && route) return "Route found";
+    if (!active && netPositive && route)
+      return `+${((route.netReturnBps ?? route.gapBps) / 100).toFixed(2)}% estimated return`;
     if (active && !activeQuote) {
-      if (/gas/i.test(activeReason)) return "Gas too high";
+      if (/fees are higher|gas/i.test(activeReason)) return "Fees too high";
       if (/relay|setup/i.test(activeReason)) return "Setup needed";
       if (/busy|network/i.test(activeReason)) return "Network busy";
       if (/no route|not executable/i.test(activeReason)) return "No route right now";

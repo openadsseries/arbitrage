@@ -10,10 +10,15 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { base } from "viem/chains";
 import { z } from "zod";
-import { ARBITRAGE_EXECUTOR_V3_ABI } from "@/lib/arbitrage";
+import {
+  ARBITRAGE_EXECUTOR_V3_ABI,
+  ARBITRAGE_EXECUTOR_V4_ABI,
+  type ArbitrageExecutorVersion,
+} from "@/lib/arbitrage";
 import { CHAINS } from "@/lib/chains";
 import { compactActionError } from "@/lib/errors";
 import { readDirectArbitrageExecutionStatus } from "@/lib/server/arbitrage-execution";
+import { readDirectArbitrageExecutionStatusV4 } from "@/lib/server/arbitrage-execution";
 import {
   rateLimit,
   readBoundedJson,
@@ -25,11 +30,16 @@ export const dynamic = "force-dynamic";
 const requestSchema = z.object({
   owner: z.string().refine(isAddress, "Connect wallet."),
   strategyId: z.string().regex(/^\d+$/, "Invalid position."),
+  version: z.enum(["v3", "v4"]),
 });
 const statusRequestSchema = requestSchema.partial().refine(
   (value) =>
-    (value.owner === undefined && value.strategyId === undefined) ||
-    (value.owner !== undefined && value.strategyId !== undefined),
+    (value.owner === undefined &&
+      value.strategyId === undefined &&
+      value.version === undefined) ||
+    (value.owner !== undefined &&
+      value.strategyId !== undefined &&
+      value.version !== undefined),
   "Invalid position.",
 );
 const EXPECTED_EXECUTOR = "0xbB7AF71818fD1a269f21D0b5E4d8F7CF5401Ac3C";
@@ -100,7 +110,7 @@ function rpcUrl() {
   return url;
 }
 
-async function relayContext() {
+async function relayContext(version: ArbitrageExecutorVersion) {
   const account = privateKeyToAccount(relayPrivateKey());
   const primaryRpc = rpcUrl();
   const rpcEndpoints = [primaryRpc, "https://mainnet.base.org"].filter(
@@ -111,62 +121,61 @@ async function relayContext() {
     { rank: false, retryCount: 0 },
   );
   const publicClient = createPublicClient({ chain: base, transport });
-  const executorValue = process.env.NEXT_PUBLIC_ARBITRAGE_EXECUTOR_V3;
+  const executorValue =
+    version === "v4"
+      ? process.env.NEXT_PUBLIC_ARBITRAGE_EXECUTOR_V4
+      : process.env.NEXT_PUBLIC_ARBITRAGE_EXECUTOR_V3;
   if (!executorValue || !isAddress(executorValue)) {
     throw new Error("Arbitrage contract not configured.");
   }
   const executor = getAddress(executorValue);
-  if (executor !== getAddress(EXPECTED_EXECUTOR)) {
+  if (version === "v3" && executor !== getAddress(EXPECTED_EXECUTOR)) {
     throw new Error("Arbitrage contract address changed.");
   }
   if (
+    version === "v3" &&
     process.env.ARBITRAGE_EXECUTOR_V3_DEPLOYMENT_BLOCK?.trim() !==
-    EXPECTED_DEPLOYMENT_BLOCK
+      EXPECTED_DEPLOYMENT_BLOCK
   ) {
     throw new Error("Arbitrage deployment block changed.");
   }
-  const [
-    chainId,
-    balance,
-    code,
-    protocolFeeBps,
-    executorRewardBps,
-    weth,
-    mintClubBond,
-    onchainRouter,
-  ] = await Promise.all([
+  const abi =
+    version === "v4" ? ARBITRAGE_EXECUTOR_V4_ABI : ARBITRAGE_EXECUTOR_V3_ABI;
+  const [chainId, balance, code, protocolFeeBps, executorRewardBps, weth, mintClubBond, onchainRouter] = await Promise.all([
     publicClient.getChainId(),
     publicClient.getBalance({ address: account.address }),
     publicClient.getCode({ address: executor }),
     publicClient.readContract({
       address: executor,
-      abi: ARBITRAGE_EXECUTOR_V3_ABI,
+      abi,
       functionName: "protocolFeeBps",
     }),
     publicClient.readContract({
       address: executor,
-      abi: ARBITRAGE_EXECUTOR_V3_ABI,
-      functionName: "executorRewardBps",
+      abi,
+      functionName:
+        version === "v4" ? "executorProfitShareBps" : "executorRewardBps",
     }),
     publicClient.readContract({
       address: executor,
-      abi: ARBITRAGE_EXECUTOR_V3_ABI,
+      abi,
       functionName: "weth",
     }),
     publicClient.readContract({
       address: executor,
-      abi: ARBITRAGE_EXECUTOR_V3_ABI,
+      abi,
       functionName: "mintClubBond",
     }),
     publicClient.readContract({
       address: executor,
-      abi: ARBITRAGE_EXECUTOR_V3_ABI,
+      abi,
       functionName: "onchainRouter",
     }),
   ]);
   if (chainId !== base.id) throw new Error("Relay is not connected to Base.");
   if (!code || code === "0x") throw new Error("Arbitrage contract not found.");
-  if (protocolFeeBps !== 0 || executorRewardBps !== 2_000) {
+  const expectedRewardBps = version === "v4" ? 1_000 : 2_000;
+  if (protocolFeeBps !== 0 || executorRewardBps !== expectedRewardBps) {
     throw new Error("Arbitrage fee policy changed.");
   }
   if (getAddress(weth) !== CHAINS.base.weth)
@@ -175,7 +184,37 @@ async function relayContext() {
     throw new Error("Mint Club address changed.");
   if (getAddress(onchainRouter) !== getAddress(EXPECTED_ROUTER))
     throw new Error("Arbitrage router changed.");
-  return { account, balance, executor, publicClient, transport };
+  if (version === "v4") {
+    const [trustedExecutor, paused] = await Promise.all([
+      publicClient.readContract({
+        address: executor,
+        abi: ARBITRAGE_EXECUTOR_V4_ABI,
+        functionName: "trustedExecutor",
+      }),
+      publicClient.readContract({
+        address: executor,
+        abi: ARBITRAGE_EXECUTOR_V4_ABI,
+        functionName: "paused",
+      }),
+    ]);
+    if (getAddress(trustedExecutor) !== account.address)
+      throw new Error("Relay is not authorized.");
+    if (paused) throw new Error("Relay is paused.");
+  }
+  return { account, balance, executor, publicClient, transport, version };
+}
+
+function activeRelayVersion(): ArbitrageExecutorVersion {
+  return process.env.NEXT_PUBLIC_ARBITRAGE_V4_ENABLED === "true" ? "v4" : "v3";
+}
+
+function readExecutionStatus(
+  version: ArbitrageExecutorVersion,
+  input: Parameters<typeof readDirectArbitrageExecutionStatus>[0],
+) {
+  return version === "v4"
+    ? readDirectArbitrageExecutionStatusV4(input)
+    : readDirectArbitrageExecutionStatus(input);
 }
 
 export async function GET(request: Request) {
@@ -189,8 +228,10 @@ export async function GET(request: Request) {
     const input = statusRequestSchema.parse({
       owner: url.searchParams.get("owner") ?? undefined,
       strategyId: url.searchParams.get("strategyId") ?? undefined,
+      version: url.searchParams.get("version") ?? undefined,
     });
-    const { account, balance, publicClient } = await relayContext();
+    const version = input.version ?? activeRelayVersion();
+    const { account, balance, publicClient } = await relayContext(version);
     const requiredBalance = minimumRelayBalance();
     if (balance < requiredBalance) {
       return NextResponse.json({
@@ -221,7 +262,7 @@ export async function GET(request: Request) {
     if (!input.owner || !input.strategyId) {
       return NextResponse.json(relayStatus);
     }
-    const strategy = await readDirectArbitrageExecutionStatus({
+    const strategy = await readExecutionStatus(version, {
       owner: getAddress(input.owner),
       strategyId: BigInt(input.strategyId),
       executionAccount: account.address,
@@ -233,6 +274,7 @@ export async function GET(request: Request) {
       ...relayStatus,
       strategy: {
         status: strategy.status,
+        code: strategy.code,
         execution: "execution" in strategy ? strategy.execution : null,
         error: "error" in strategy ? strategy.error : null,
       },
@@ -268,7 +310,7 @@ export async function POST(request: Request) {
   if (generalLimit) return generalLimit;
   try {
     const input = requestSchema.parse(await readBoundedJson(request, 4_096));
-    const lockKey = `${input.owner.toLowerCase()}:${input.strategyId}`;
+    const lockKey = `${input.version}:${input.owner.toLowerCase()}:${input.strategyId}`;
     const strategyLimit = rateLimit(request, "arbitrage-strategy", {
       key: lockKey,
       limit: 4,
@@ -284,7 +326,7 @@ export async function POST(request: Request) {
     relayLocks.add(lockKey);
     try {
       const { account, balance, executor, publicClient, transport } =
-        await relayContext();
+        await relayContext(input.version);
       if (balance < minimumRelayBalance()) {
         throw new Error("Relay needs Base ETH.");
       }
@@ -297,7 +339,7 @@ export async function POST(request: Request) {
         chain: base,
         transport,
       });
-      const quote = await readDirectArbitrageExecutionStatus({
+      const quote = await readExecutionStatus(input.version, {
         owner: getAddress(input.owner),
         strategyId: BigInt(input.strategyId),
         executionAccount: account.address,
@@ -308,6 +350,7 @@ export async function POST(request: Request) {
       if (quote.status !== "ready") {
         return NextResponse.json({
           status: quote.status,
+          code: quote.code,
           execution: "execution" in quote ? quote.execution : null,
           error: compactActionError(new Error(quote.error), "Watching."),
         });
@@ -319,28 +362,53 @@ export async function POST(request: Request) {
       const settleGasReservation = reserveRelayGas(
         BigInt(execution.totalFeeWethRaw),
       );
-      const args = [
-        BigInt(execution.strategyId),
-        execution.direction,
-        {
-          amountInReserve: BigInt(execution.params.amountInReserve),
-          hAmountForMint: BigInt(execution.params.hAmountForMint),
-          minimumWethOut: BigInt(execution.params.minimumWethOut),
-          minimumHypedOut: BigInt(execution.params.minimumHypedOut),
-          minimumBondOut: BigInt(execution.params.minimumBondOut),
-          minimumReserveOut: BigInt(execution.params.minimumReserveOut),
-        },
-      ] as const;
       try {
-        const simulation = await publicClient.simulateContract({
-          account,
-          address: executor,
-          abi: ARBITRAGE_EXECUTOR_V3_ABI,
-          functionName: "execute",
-          args,
-          blockTag: "pending",
-        });
-        const hash = await walletClient.writeContract(simulation.request);
+        let hash: `0x${string}`;
+        if (input.version === "v4") {
+          const simulation = await publicClient.simulateContract({
+                account,
+                address: executor,
+                abi: ARBITRAGE_EXECUTOR_V4_ABI,
+                functionName: "execute",
+                args: [
+                  BigInt(execution.strategyId),
+                  execution.direction,
+                  {
+                    amountInReserve: BigInt(execution.params.amountInReserve),
+                    hAmountForMint: BigInt(execution.params.hAmountForMint),
+                    minimumHypedOut: BigInt(execution.params.minimumHypedOut),
+                    minimumBondOut: BigInt(execution.params.minimumBondOut),
+                    minimumReserveOut: BigInt(execution.params.minimumReserveOut),
+                    feeReimbursementWei: BigInt(
+                      execution.params.feeReimbursementWei ?? "0",
+                    ),
+                  },
+                ],
+                blockTag: "pending",
+              });
+          hash = await walletClient.writeContract(simulation.request);
+        } else {
+          const simulation = await publicClient.simulateContract({
+                account,
+                address: executor,
+                abi: ARBITRAGE_EXECUTOR_V3_ABI,
+                functionName: "execute",
+                args: [
+                  BigInt(execution.strategyId),
+                  execution.direction,
+                  {
+                    amountInReserve: BigInt(execution.params.amountInReserve),
+                    hAmountForMint: BigInt(execution.params.hAmountForMint),
+                    minimumWethOut: BigInt(execution.params.minimumWethOut),
+                    minimumHypedOut: BigInt(execution.params.minimumHypedOut),
+                    minimumBondOut: BigInt(execution.params.minimumBondOut),
+                    minimumReserveOut: BigInt(execution.params.minimumReserveOut),
+                  },
+                ],
+                blockTag: "pending",
+              });
+          hash = await walletClient.writeContract(simulation.request);
+        }
         settleGasReservation(true);
         try {
           const receipt = await publicClient.waitForTransactionReceipt({
