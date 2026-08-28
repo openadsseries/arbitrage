@@ -1,10 +1,20 @@
 # Base deployment record
 
-## V4 migration candidate (not deployed)
+## V4 migration candidate (deployed, not active)
 
 `HypedArbitrageExecutorV4` is implemented and connected across the application behind a
-disabled feature gate. It is not deployed on Base and must not receive production traffic
-until the ordered release gates below pass.
+disabled feature gate. It was deployed and exactly source-verified on Base, but must not
+receive production traffic until the remaining canary release gates below pass.
+
+- Contract: `0x6Aad2b4BB89813B4E0Db43170c8b314417B1D571`
+- Deployment transaction: `0x307e79c39b5d6caf87ba5c173a75130aa738c92ebea64736f0e39723ecb793a8`
+- Deployment block: `50561393`
+- Deployer and operator manager: `0x673F0277f9B7Aaebc80A07c199dbF32007455495`
+- Trusted relay: `0x7dB6BDD7e852f5eF45260b0e5D087aE9fdf85c3C`
+- Source verification: Sourcify creation and runtime exact match
+- Guardian role: none
+- Activation: disabled; V3 remains the production executor
+- Canary blocker: the deployer and relay currently hold no supported Reserve Token
 
 The binding objective, compatibility policy, release gates, rollback rules, and prohibited
 shortcuts are defined in [`../docs/ARBITRAGE_V4_MIGRATION.md`](../docs/ARBITRAGE_V4_MIGRATION.md).
@@ -25,7 +35,7 @@ L1 data cost is required for Base profitability accounting because every Base tr
 Migration must be explicit:
 
 1. Complete an independent review of the V4 bytecode, Base fee assumptions, and role addresses.
-2. Deploy and verify V4 with a dedicated funded relay and a separately controlled operator manager.
+2. Keep the deployed V4 relay funded and the narrow operator manager separately controlled from it.
 3. Run the full contract suite and a small capped Base end-to-end strategy against the deployed bytecode.
 4. Add V4 application configuration without removing the V3 address or deployment block.
 5. Create new strategies on V4 while keeping V3 reads, stop actions, and allowance revocation available.
@@ -59,28 +69,20 @@ authorize a production deployment by itself.
 - `ARBITRAGE_RELAYER_ADDRESS`: dedicated execution wallet derived from the relay key.
 - `ARBITRAGE_V4_OPERATOR_MANAGER`: separately controlled manager, preferably a multisig;
   it handles two-step relay rotation and emergency pause.
-- `ARBITRAGE_DEPLOYER_ADDRESS`: the public address selected in the browser wallet.
+- `ARBITRAGE_DEPLOYER_ADDRESS`: the public deployment address, when a deployment helper needs it.
 
 The relay and manager must be separate operational roles. The manager cannot withdraw
-tokens, edit user strategies, or change fixed economics. The deployer receives no contract
-role. Never export or store its private key in this repository.
+tokens, edit user strategies, or change fixed economics. The V4 deployment deliberately
+uses the previous V3 deployer as the manager and keeps the relay separate. Private keys
+remain only in the ignored local environment and deployment platform secrets.
 
-### 3. Deploy V4 to Base
+### 3. Deploy V4 to Base (complete)
 
-Build and simulate the deployment first. Then use the local review page to connect the
-specified OKX account, verify every public role, estimate the Base fee, and approve once.
-The page never requests or stores a private key.
-
-```sh
-cd contracts
-forge build
-node script/deploy-v4-browser.mjs
-```
-
-Open `http://127.0.0.1:9546`, connect OKX Wallet, and approve only after the network,
-deployer, relay, manager, and estimated cost are correct. Record the contract
-address, deployment transaction, and deployment block here. Verify the exact source
-before continuing.
+The deployment reused the ignored local key that deployed V3. Before submission, the
+script derived only its public address, matched it to the V3 deployment transaction,
+estimated the Base fee, checked the balance and predicted address, and kept the key out
+of output and process arguments. The resulting V4 address and source match are recorded
+above.
 
 ### 4. Configure without activating
 

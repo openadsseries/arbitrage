@@ -1,6 +1,10 @@
 # Arbitrage V4 migration
 
-Status: pre-deployment gate
+Status: deployed on Base, feature gate off pending canary
+
+Current blocker: neither local signing wallet holds a supported Reserve Token. V3 remains
+active until a deliberately funded, tightly capped V4 canary completes start, execution,
+stop, and allowance-revocation checks on Base.
 
 ## Why V4 exists
 
