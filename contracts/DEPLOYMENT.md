@@ -14,7 +14,16 @@ receive production traffic until the remaining canary release gates below pass.
 - Source verification: Sourcify creation and runtime exact match
 - Guardian role: none
 - Activation: disabled; V3 remains the production executor
-- Canary blocker: the deployer and relay currently hold no supported Reserve Token
+- Control-path canary: passed on Base for exact approval, strategy start, stop, and allowance revoke
+- Execution canary blocker: the deployer and relay currently hold no supported Reserve Token
+
+Control-path canary transactions:
+
+- Approve `1 wei MT`: `0x3d4334288799b0d48e26a15554de33d1ab01c65f91d72619fb64923ddeca4faf`
+- Start strategy `#1`: `0x2e0e1225588213ce65a2056e7793775c603e1d618308ed2eaf8c3539115e1eaf`
+- Stop strategy `#1`: `0x30c46be9914a77a83c6cd36b5b629c8a2236f4943415a882738084c8639069ec`
+- Revoke allowance: `0x6cd28924911bfcca88752ffe1e7e2af22a1dd899bfb837d74ccae356f56bea1e`
+- Final state: `activeStrategyId = 0`, V4 MT allowance `= 0`
 
 The binding objective, compatibility policy, release gates, rollback rules, and prohibited
 shortcuts are defined in [`../docs/ARBITRAGE_V4_MIGRATION.md`](../docs/ARBITRAGE_V4_MIGRATION.md).
