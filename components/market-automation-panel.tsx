@@ -157,7 +157,6 @@ export function MarketAutomationPanel({
   onRouteChecksChange,
   budget,
   budgetRaw,
-  minimumBenchmarkRaw,
   onBudgetChange,
   estimatedProfitRaw,
   watchOpportunity,
@@ -171,7 +170,6 @@ export function MarketAutomationPanel({
   onRouteChecksChange?: (checks: ArbitrageRouteCheck[]) => void;
   budget: string;
   budgetRaw: bigint | null;
-  minimumBenchmarkRaw: bigint | null;
   onBudgetChange: (value: string) => void;
   estimatedProfitRaw: string | null;
   watchOpportunity: ArbitrageOpportunity | null;
@@ -365,8 +363,6 @@ export function MarketAutomationPanel({
   const budgetError =
     budgetRaw === null
       ? "Enter a valid amount."
-      : minimumBenchmarkRaw !== null && budgetRaw < minimumBenchmarkRaw
-        ? "Use at least the $10 benchmark."
       : reserveBalanceRaw !== null && budgetRaw > reserveBalanceRaw
         ? `Not enough ${market.reserveSymbol} in this wallet.`
         : "";

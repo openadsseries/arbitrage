@@ -41,14 +41,12 @@ export function MarketAssetDetail({
   marketComparison,
   initialOpportunity,
   initialAmountRaw,
-  benchmarkAmountRaw,
 }: {
   market: VerifiedMarket;
   arbitrageReadiness: ArbitrageMarketReadiness | null;
   marketComparison: MarketComparisonState;
   initialOpportunity: ArbitrageOpportunity | null;
   initialAmountRaw: string;
-  benchmarkAmountRaw: string;
 }) {
   const chain = CHAINS[market.chain];
   const [view, setView] = useState<"arbitrage" | MarketAssetKind>("arbitrage");
@@ -78,20 +76,6 @@ export function MarketAssetDetail({
       return null;
     }
   }, [arbitrageBudget, market.reserveDecimals]);
-  const minimumBenchmarkRaw = useMemo(() => {
-    try {
-      const value = BigInt(benchmarkAmountRaw);
-      return value > 0n ? value : null;
-    } catch {
-      return null;
-    }
-  }, [benchmarkAmountRaw]);
-  const quoteableBudgetRaw =
-    arbitrageBudgetRaw !== null &&
-    minimumBenchmarkRaw !== null &&
-    arbitrageBudgetRaw < minimumBenchmarkRaw
-      ? null
-      : arbitrageBudgetRaw;
   const quoteBudgetRaw = useMemo(() => {
     if (!activeArbitrageAmountRaw) return arbitrageBudgetRaw;
     try {
@@ -210,9 +194,7 @@ export function MarketAssetDetail({
               {marketsConnected ? (
                 <ArbitragePriceGap
                   market={market}
-                  checkedAmountRaw={
-                    activeArbitrageAmountRaw ? quoteBudgetRaw : quoteableBudgetRaw
-                  }
+                  checkedAmountRaw={quoteBudgetRaw}
                   marketComparison={marketComparison}
                   initialOpportunity={initialOpportunity}
                   onEstimatedProfitChange={setEstimatedProfitRaw}
@@ -245,7 +227,6 @@ export function MarketAssetDetail({
                 onRouteChecksChange={setRouteChecks}
                 budget={arbitrageBudget}
                 budgetRaw={arbitrageBudgetRaw}
-                minimumBenchmarkRaw={minimumBenchmarkRaw}
                 onBudgetChange={setArbitrageBudget}
                 estimatedProfitRaw={estimatedProfitRaw}
                 watchOpportunity={watchOpportunity}

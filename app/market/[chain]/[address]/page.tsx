@@ -24,25 +24,17 @@ export default async function MarketDetailPage({
   const requestedAmountRaw = Array.isArray(query.amountRaw)
     ? query.amountRaw[0]
     : query.amountRaw;
-  const requestedAmount =
-    requestedAmountRaw && /^\d+$/.test(requestedAmountRaw)
-      ? BigInt(requestedAmountRaw)
-      : 0n;
-  const benchmarkAmount = BigInt(benchmarkAmountRaw);
   const initialAmountRaw =
-    requestedAmount > 0n &&
-    requestedAmount >= benchmarkAmount &&
-    requestedAmount < (1n << 128n)
-      ? requestedAmount.toString()
+    requestedAmountRaw &&
+    /^\d+$/.test(requestedAmountRaw) &&
+    BigInt(requestedAmountRaw) > 0n &&
+    BigInt(requestedAmountRaw) < (1n << 128n)
+      ? requestedAmountRaw
       : benchmarkAmountRaw;
   return (
     <div className="inner-page page-shell market-detail-page">
       <Link href="/markets" className="back-link"><ArrowLeft /> Markets</Link>
-      <MarketAssetDetail
-        {...assetDetail}
-        benchmarkAmountRaw={benchmarkAmountRaw}
-        initialAmountRaw={initialAmountRaw}
-      />
+      <MarketAssetDetail {...assetDetail} initialAmountRaw={initialAmountRaw} />
     </div>
   );
 }
