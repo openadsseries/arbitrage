@@ -19,17 +19,23 @@ function nested(source: unknown, key: string) {
   return key in source ? (source as Record<string, unknown>)[key] : null;
 }
 
+function isOkxProvider(candidate: unknown) {
+  return Boolean(
+    nested(candidate, "isOkxWallet") ?? nested(candidate, "isOKExWallet"),
+  );
+}
+
 export function injectedProviderFrom(source: unknown): InjectedProvider | null {
   const ethereum = nested(source, "ethereum");
-  const direct = validProvider(ethereum);
-  if (direct) return direct;
-
   const providers = nested(ethereum, "providers");
   if (Array.isArray(providers)) {
-    const okx = providers.find((provider) => Boolean(nested(provider, "isOkxWallet")));
+    const okx = providers.find(isOkxProvider);
     const preferred = validProvider(okx) ?? validProvider(providers[0]);
     if (preferred) return preferred;
   }
+
+  const direct = validProvider(ethereum);
+  if (direct) return direct;
 
   const okxWallet = nested(source, "okxwallet") ?? nested(source, "okxWallet");
   return validProvider(nested(okxWallet, "ethereum")) ?? validProvider(okxWallet);

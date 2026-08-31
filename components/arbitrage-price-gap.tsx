@@ -557,8 +557,7 @@ export function ArbitragePriceGap({
   const headline = (() => {
     if (active && netPositive && route)
       return `+${((route.netReturnBps ?? route.gapBps) / 100).toFixed(2)}% price gap`;
-    if (!active && netPositive && route)
-      return `+${((route.netReturnBps ?? route.gapBps) / 100).toFixed(2)}% estimated return`;
+    if (!active && netPositive && route) return "Route estimate";
     if (active && !activeQuote) {
       if (/unavailable|read failed/i.test(activeReason))
         return "Price check unavailable";

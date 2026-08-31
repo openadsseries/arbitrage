@@ -11,8 +11,12 @@ describe("injectedProviderFrom", () => {
 
   it("detects OKX injected wallet providers", () => {
     const okx = { request: vi.fn(), isOkxWallet: true };
+    const okxLegacy = { request: vi.fn(), isOKExWallet: true };
     const fallback = { request: vi.fn() };
+    const aggregate = { request: vi.fn(), providers: [fallback, okx] };
+    expect(injectedProviderFrom({ ethereum: aggregate })).toBe(okx);
     expect(injectedProviderFrom({ ethereum: { providers: [fallback, okx] } })).toBe(okx);
+    expect(injectedProviderFrom({ ethereum: { providers: [fallback, okxLegacy] } })).toBe(okxLegacy);
     expect(injectedProviderFrom({ okxwallet: okx })).toBe(okx);
     expect(injectedProviderFrom({ okxwallet: { ethereum: okx } })).toBe(okx);
   });

@@ -153,7 +153,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const connect = useCallback(async (preferredChain?: ChainKey) => {
     const provider = currentProvider();
     if (!provider) {
-      setError("Wallet extension needed. Install or enable one, then try again.");
+      setError("Wallet is not exposed to this site. Enable site access in your wallet extension, then try again.");
       return null;
     }
     setConnecting(true);
