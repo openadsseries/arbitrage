@@ -42,4 +42,28 @@ describe("bounded arbitrage amount search", () => {
     const result = await maximizeExecutable(100n, async () => null);
     expect(result).toBeNull();
   });
+
+  it("propagates infrastructure failures when the caller requires a complete check", async () => {
+    await expect(
+      maximizeExecutable(
+        100n,
+        async () => {
+          throw new Error("RPC request failed: 429");
+        },
+        { onEvaluationError: () => "throw" },
+      ),
+    ).rejects.toThrow("RPC request failed");
+  });
+
+  it("still ignores explicitly recoverable missing-route samples", async () => {
+    const result = await maximizeExecutable(
+      10n,
+      async (amount) => {
+        if (amount < 8n) throw new Error("No route");
+        return { amount, net: 2n };
+      },
+      { onEvaluationError: () => "ignore" },
+    );
+    expect(result?.amount).toBeGreaterThanOrEqual(8n);
+  });
 });

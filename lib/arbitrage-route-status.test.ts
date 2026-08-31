@@ -100,4 +100,21 @@ describe("buildArbitrageRouteChecks", () => {
 
     expect(checks[2]).toMatchObject({ value: "Covered", tone: "ready" });
   });
+
+  it("does not present an incomplete price check as no profit or high fees", () => {
+    const checks = buildArbitrageRouteChecks({
+      readiness,
+      opportunity,
+      reserveBalanceRaw: "100",
+      active: true,
+      reason: "Price check unavailable.",
+      quote: null,
+    });
+
+    expect(checks[2]).toMatchObject({
+      value: "Check unavailable",
+      tone: "waiting",
+    });
+    expect(checks[3]).toMatchObject({ value: "Retrying", tone: "ready" });
+  });
 });

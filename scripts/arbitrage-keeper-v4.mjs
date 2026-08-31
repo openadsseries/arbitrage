@@ -1,10 +1,4 @@
-import {
-  createPublicClient,
-  fallback,
-  getAddress,
-  http,
-  parseAbi,
-} from "viem";
+import { createPublicClient, fallback, getAddress, http, parseAbi } from "viem";
 import { base } from "viem/chains";
 
 const ABI = parseAbi([
@@ -12,6 +6,12 @@ const ABI = parseAbi([
   "function strategies(uint256) view returns (address owner,address hToken,address reserveToken,uint40 validUntil,bool active,uint64 executionCount,uint64 lastExecutionBlock,uint256 maxReservePerExecution,uint256 remainingVolume,uint256 minProfitReserve,uint256 maxFeeReimbursementReserve,uint16 minProfitBps)",
 ]);
 const MIN_REQUEST_GAP_MS = 5_500;
+const PUBLIC_RPC_HOSTS = new Set([
+  "base-rpc.publicnode.com",
+  "base-mainnet.public.blastapi.io",
+  "mainnet.base.org",
+  "mainnet-preconf.base.org",
+]);
 
 function required(name) {
   const value = process.env[name]?.trim();
@@ -30,19 +30,49 @@ function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function rpcUrls() {
+  return [
+    required("BASE_RPC_URL"),
+    ...(process.env.BASE_RPC_FALLBACK_URLS?.split(",") ?? []),
+  ]
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .filter((value, index, values) => values.indexOf(value) === index);
+}
+
+function isKnownPublicRpc(url) {
+  try {
+    return PUBLIC_RPC_HOSTS.has(new URL(url).hostname.toLowerCase());
+  } catch {
+    return true;
+  }
+}
+
 const executor = getAddress(required("NEXT_PUBLIC_ARBITRAGE_EXECUTOR_V4"));
 const appUrl = new URL(required("ARBITRAGE_APP_URL"));
 if (appUrl.protocol !== "https:" && appUrl.hostname !== "localhost") {
   throw new Error("ARBITRAGE_APP_URL must use HTTPS.");
 }
-const pollMs = Math.max(integer("ARBITRAGE_V4_KEEPER_POLL_MS", 120_000), 30_000);
+const pollMs = Math.max(
+  integer("ARBITRAGE_V4_KEEPER_POLL_MS", 120_000),
+  30_000,
+);
+const rpcEndpoints = rpcUrls();
+if (
+  process.env.ARBITRAGE_RPC_PRODUCTION_READY !== "true" ||
+  rpcEndpoints.every(isKnownPublicRpc)
+) {
+  throw new Error("Authenticated Base RPC required.");
+}
 const transport = fallback(
-  [required("BASE_RPC_URL"), "https://mainnet.base.org"]
-    .filter((url, index, endpoints) => endpoints.indexOf(url) === index)
-    .map((url) => http(url, { retryCount: 0, timeout: 8_000 })),
+  rpcEndpoints.map((url) => http(url, { retryCount: 0, timeout: 8_000 })),
   { rank: false, retryCount: 0 },
 );
-const client = createPublicClient({ chain: base, transport });
+const client = createPublicClient({
+  batch: { multicall: true },
+  chain: base,
+  transport,
+});
 
 async function activeStrategies() {
   const count = await client.readContract({
@@ -51,7 +81,9 @@ async function activeStrategies() {
     functionName: "strategyCount",
   });
   if (count === 0n) return [];
-  const ids = Array.from({ length: Number(count) }, (_, index) => BigInt(index + 1));
+  const ids = Array.from({ length: Number(count) }, (_, index) =>
+    BigInt(index + 1),
+  );
   const strategies = await client.multicall({
     allowFailure: false,
     contracts: ids.map((id) => ({
@@ -68,7 +100,9 @@ async function activeStrategies() {
       active &&
       remainingVolume > 0n &&
       (validUntil === 0 || Number(validUntil) >= now);
-    return live ? [{ id: ids[index].toString(), owner: getAddress(owner) }] : [];
+    return live
+      ? [{ id: ids[index].toString(), owner: getAddress(owner) }]
+      : [];
   });
 }
 
@@ -87,16 +121,27 @@ async function checkStrategy(strategy) {
   console.log(`V4 strategy ${strategy.id}: ${state}`);
 }
 
-console.log(`V4 keeper: ${executor}`);
-for (;;) {
+async function runOnce() {
   try {
     const strategies = await activeStrategies();
+    if (strategies.length === 0) console.log("V4 keeper: no active strategies");
     for (const strategy of strategies) {
       await checkStrategy(strategy);
       await wait(MIN_REQUEST_GAP_MS);
     }
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
   }
-  await wait(pollMs);
+}
+
+console.log(`V4 keeper: ${executor}`);
+if (process.argv.includes("--once")) {
+  await runOnce();
+} else {
+  for (;;) {
+    await runOnce();
+    process.exitCode = 0;
+    await wait(pollMs);
+  }
 }

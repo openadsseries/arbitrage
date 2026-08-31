@@ -2,9 +2,7 @@ import { NextResponse } from "next/server";
 import {
   createPublicClient,
   createWalletClient,
-  fallback,
   getAddress,
-  http,
   isAddress,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -17,6 +15,12 @@ import {
 } from "@/lib/arbitrage";
 import { CHAINS } from "@/lib/chains";
 import { compactActionError } from "@/lib/errors";
+import {
+  assertProductionV4Rpc,
+  createBaseRpcTransport,
+  parseBaseRpcUrls,
+} from "@/lib/server/base-rpc";
+import { isArbitrageInfrastructureError } from "@/lib/arbitrage-execution-errors";
 import { readDirectArbitrageExecutionStatus } from "@/lib/server/arbitrage-execution";
 import { readDirectArbitrageExecutionStatusV4 } from "@/lib/server/arbitrage-execution";
 import {
@@ -32,16 +36,14 @@ const requestSchema = z.object({
   strategyId: z.string().regex(/^\d+$/, "Invalid position."),
   version: z.enum(["v3", "v4"]),
 });
-const statusRequestSchema = requestSchema.partial().refine(
-  (value) =>
-    (value.owner === undefined &&
-      value.strategyId === undefined &&
-      value.version === undefined) ||
-    (value.owner !== undefined &&
-      value.strategyId !== undefined &&
-      value.version !== undefined),
-  "Invalid position.",
-);
+const statusRequestSchema = requestSchema
+  .partial()
+  .refine(
+    (value) =>
+      (value.owner === undefined && value.strategyId === undefined) ||
+      (value.owner !== undefined && value.strategyId !== undefined),
+    "Invalid position.",
+  );
 const EXPECTED_EXECUTOR = "0xbB7AF71818fD1a269f21D0b5E4d8F7CF5401Ac3C";
 const EXPECTED_DEPLOYMENT_BLOCK = "50422622";
 const EXPECTED_ROUTER = "0xCa7a19BD1E260DCd92B17DdAc068C2bF67539a02";
@@ -104,23 +106,16 @@ function currentRelayGasBudget() {
   return current;
 }
 
-function rpcUrl() {
-  const url = process.env.BASE_RPC_URL;
-  if (!url) throw new Error("Relay not configured.");
-  return url;
-}
-
 async function relayContext(version: ArbitrageExecutorVersion) {
   const account = privateKeyToAccount(relayPrivateKey());
-  const primaryRpc = rpcUrl();
-  const rpcEndpoints = [primaryRpc, "https://mainnet.base.org"].filter(
-    (url, index, endpoints) => endpoints.indexOf(url) === index,
-  );
-  const transport = fallback(
-    rpcEndpoints.map((url) => http(url, { retryCount: 0, timeout: 8_000 })),
-    { rank: false, retryCount: 0 },
-  );
-  const publicClient = createPublicClient({ chain: base, transport });
+  const rpcEndpoints = parseBaseRpcUrls();
+  if (version === "v4") assertProductionV4Rpc(rpcEndpoints);
+  const transport = createBaseRpcTransport(rpcEndpoints);
+  const publicClient = createPublicClient({
+    batch: { multicall: true },
+    chain: base,
+    transport,
+  });
   const executorValue =
     version === "v4"
       ? process.env.NEXT_PUBLIC_ARBITRAGE_EXECUTOR_V4
@@ -141,7 +136,16 @@ async function relayContext(version: ArbitrageExecutorVersion) {
   }
   const abi =
     version === "v4" ? ARBITRAGE_EXECUTOR_V4_ABI : ARBITRAGE_EXECUTOR_V3_ABI;
-  const [chainId, balance, code, protocolFeeBps, executorRewardBps, weth, mintClubBond, onchainRouter] = await Promise.all([
+  const [
+    chainId,
+    balance,
+    code,
+    protocolFeeBps,
+    executorRewardBps,
+    weth,
+    mintClubBond,
+    onchainRouter,
+  ] = await Promise.all([
     publicClient.getChainId(),
     publicClient.getBalance({ address: account.address }),
     publicClient.getCode({ address: executor }),
@@ -366,47 +370,47 @@ export async function POST(request: Request) {
         let hash: `0x${string}`;
         if (input.version === "v4") {
           const simulation = await publicClient.simulateContract({
-                account,
-                address: executor,
-                abi: ARBITRAGE_EXECUTOR_V4_ABI,
-                functionName: "execute",
-                args: [
-                  BigInt(execution.strategyId),
-                  execution.direction,
-                  {
-                    amountInReserve: BigInt(execution.params.amountInReserve),
-                    hAmountForMint: BigInt(execution.params.hAmountForMint),
-                    minimumHypedOut: BigInt(execution.params.minimumHypedOut),
-                    minimumBondOut: BigInt(execution.params.minimumBondOut),
-                    minimumReserveOut: BigInt(execution.params.minimumReserveOut),
-                    feeReimbursementWei: BigInt(
-                      execution.params.feeReimbursementWei ?? "0",
-                    ),
-                  },
-                ],
-                blockTag: "pending",
-              });
+            account,
+            address: executor,
+            abi: ARBITRAGE_EXECUTOR_V4_ABI,
+            functionName: "execute",
+            args: [
+              BigInt(execution.strategyId),
+              execution.direction,
+              {
+                amountInReserve: BigInt(execution.params.amountInReserve),
+                hAmountForMint: BigInt(execution.params.hAmountForMint),
+                minimumHypedOut: BigInt(execution.params.minimumHypedOut),
+                minimumBondOut: BigInt(execution.params.minimumBondOut),
+                minimumReserveOut: BigInt(execution.params.minimumReserveOut),
+                feeReimbursementWei: BigInt(
+                  execution.params.feeReimbursementWei ?? "0",
+                ),
+              },
+            ],
+            blockTag: "pending",
+          });
           hash = await walletClient.writeContract(simulation.request);
         } else {
           const simulation = await publicClient.simulateContract({
-                account,
-                address: executor,
-                abi: ARBITRAGE_EXECUTOR_V3_ABI,
-                functionName: "execute",
-                args: [
-                  BigInt(execution.strategyId),
-                  execution.direction,
-                  {
-                    amountInReserve: BigInt(execution.params.amountInReserve),
-                    hAmountForMint: BigInt(execution.params.hAmountForMint),
-                    minimumWethOut: BigInt(execution.params.minimumWethOut),
-                    minimumHypedOut: BigInt(execution.params.minimumHypedOut),
-                    minimumBondOut: BigInt(execution.params.minimumBondOut),
-                    minimumReserveOut: BigInt(execution.params.minimumReserveOut),
-                  },
-                ],
-                blockTag: "pending",
-              });
+            account,
+            address: executor,
+            abi: ARBITRAGE_EXECUTOR_V3_ABI,
+            functionName: "execute",
+            args: [
+              BigInt(execution.strategyId),
+              execution.direction,
+              {
+                amountInReserve: BigInt(execution.params.amountInReserve),
+                hAmountForMint: BigInt(execution.params.hAmountForMint),
+                minimumWethOut: BigInt(execution.params.minimumWethOut),
+                minimumHypedOut: BigInt(execution.params.minimumHypedOut),
+                minimumBondOut: BigInt(execution.params.minimumBondOut),
+                minimumReserveOut: BigInt(execution.params.minimumReserveOut),
+              },
+            ],
+            blockTag: "pending",
+          });
           hash = await walletClient.writeContract(simulation.request);
         }
         settleGasReservation(true);
@@ -454,6 +458,17 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: error.issues[0]?.message ?? "Invalid request." },
         { status: 400 },
+      );
+    }
+    if (isArbitrageInfrastructureError(error)) {
+      return NextResponse.json(
+        {
+          status: "unavailable",
+          code: "quote-unavailable",
+          execution: null,
+          error: "Price check unavailable.",
+        },
+        { status: 503 },
       );
     }
     return NextResponse.json(

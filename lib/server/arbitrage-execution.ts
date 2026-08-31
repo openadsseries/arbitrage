@@ -19,9 +19,15 @@ import {
   requiredGasCover,
   rewardCoversExecutionFee,
 } from "../arbitrage-economics.mjs";
-import { maximizeExecutable } from "../arbitrage-optimizer.mjs";
 import { CHAINS } from "@/lib/chains";
 import { readTokenMarketPrice } from "@/lib/server/gecko-market";
+import { searchArbitrageDirection } from "@/lib/arbitrage-executable-search";
+import {
+  ArbitrageRouteUnavailableError,
+  isArbitrageContractRevertError,
+  isArbitrageInfrastructureError,
+  isArbitrageRouteUnavailableError,
+} from "@/lib/arbitrage-execution-errors";
 
 const ONCHAIN_ROUTER = "0xCa7a19BD1E260DCd92B17DdAc068C2bF67539a02" as const;
 const BPS = 10_000n;
@@ -66,23 +72,45 @@ type ArbitrageClient = Pick<PublicClient, "estimateContractGas" | "getBlock" | "
 export type DirectArbitrageExecutionStatus =
   | { status: "ready"; code: "ready"; execution: DirectArbitrageExecutionQuote }
   | { status: "waiting-gas"; code: "fees-higher-than-profit"; execution: DirectArbitrageExecutionQuote; error: string }
-  | { status: "none"; code: Exclude<ArbitrageExecutionReasonCode, "ready" | "fees-higher-than-profit">; error: string };
+  | { status: "unavailable"; code: "quote-unavailable"; error: string }
+  | { status: "none"; code: Exclude<ArbitrageExecutionReasonCode, "ready" | "fees-higher-than-profit" | "quote-unavailable">; error: string };
 
 function down(amount: bigint) {
   return amount * (BPS - SLIPPAGE_BPS) / BPS;
 }
 
 async function quoteExactInput(client: ArbitrageClient, tokenIn: Address, tokenOut: Address, amountIn: bigint) {
-  if (amountIn <= 0n) throw new Error("No route.");
-  const quote = await client.readContract({
-    address: ONCHAIN_ROUTER,
-    abi: ROUTER_ABI,
-    functionName: "routeExactInput",
-    args: [{ tokenIn, tokenOut, amountSpecified: amountIn }],
-    blockTag: "pending",
-  });
-  if (quote.amountOut <= 0n) throw new Error("No route.");
-  return quote.amountOut;
+  if (amountIn <= 0n) throw new ArbitrageRouteUnavailableError();
+  try {
+    const quote = await client.readContract({
+      address: ONCHAIN_ROUTER,
+      abi: ROUTER_ABI,
+      functionName: "routeExactInput",
+      args: [{ tokenIn, tokenOut, amountSpecified: amountIn }],
+      blockTag: "pending",
+    });
+    if (quote.amountOut <= 0n) throw new ArbitrageRouteUnavailableError();
+    return quote.amountOut;
+  } catch (error) {
+    if (
+      isArbitrageInfrastructureError(error) ||
+      isArbitrageRouteUnavailableError(error)
+    ) {
+      throw error;
+    }
+    if (isArbitrageContractRevertError(error)) {
+      throw new ArbitrageRouteUnavailableError("No route.", { cause: error });
+    }
+    throw error;
+  }
+}
+
+function quoteUnavailable(): DirectArbitrageExecutionStatus {
+  return {
+    status: "unavailable",
+    code: "quote-unavailable",
+    error: "Price check unavailable.",
+  };
 }
 
 async function addUsdPrices(execution: DirectArbitrageExecutionQuote, reserveToken: Address) {
@@ -213,7 +241,7 @@ export async function buildDirectArbitrageExecution({
   throw new Error(status.error);
 }
 
-export async function readDirectArbitrageExecutionStatus({
+async function readDirectArbitrageExecutionStatusUnchecked({
   owner,
   strategyId,
   executionAccount = owner,
@@ -266,21 +294,22 @@ export async function readDirectArbitrageExecutionStatus({
   if (available <= 0n) return { status: "none", code: "no-permission", error: "No available amount." };
 
   const bondState = await readBondState(strategy, client);
-  const [mintCandidate, redeemCandidate] = await Promise.all([
-    maximizeExecutable(
+  const [mintSearch, redeemSearch] = await Promise.all([
+    searchArbitrageDirection(
       available,
       (budget) => mintThenSell(client, strategy, budget, bondState, Number(protocolFeeBps), Number(rewardBps)),
     ),
-    maximizeExecutable(
+    searchArbitrageDirection(
       available,
       (budget) => buyThenRedeem(client, strategy, budget, Number(protocolFeeBps), Number(rewardBps)),
     ),
   ]);
-  const candidates = [mintCandidate, redeemCandidate]
+  const candidates = [mintSearch.candidate, redeemSearch.candidate]
     .filter((candidate): candidate is Candidate => Boolean(candidate))
     .filter((candidate) => candidate.ownerProfit > 0n && candidate.ownerProfit >= strategy.minProfitReserve)
     .sort((left, right) => left.ownerProfit > right.ownerProfit ? -1 : left.ownerProfit < right.ownerProfit ? 1 : 0);
 
+  let checkComplete = mintSearch.complete && redeemSearch.complete;
   let gasRejected: DirectArbitrageExecutionQuote | null = null;
   for (const candidate of candidates) {
     try {
@@ -312,12 +341,17 @@ export async function readDirectArbitrageExecutionStatus({
         protocolFeeBps,
         rewardBps,
       );
-      const simulatedRewardWeth = await quoteExactInput(
-        client,
-        strategy.reserveToken,
-        CHAINS.base.weth,
-        simulatedExecutorReward,
-      ).catch(() => 0n);
+      let simulatedRewardWeth = 0n;
+      try {
+        simulatedRewardWeth = await quoteExactInput(
+          client,
+          strategy.reserveToken,
+          CHAINS.base.weth,
+          simulatedExecutorReward,
+        );
+      } catch (error) {
+        if (!isArbitrageRouteUnavailableError(error)) throw error;
+      }
       const requiredWeth = requiredGasCover(totalFee, GAS_MARGIN_BPS);
       const execution: DirectArbitrageExecutionQuote = {
         version: "v3",
@@ -342,10 +376,13 @@ export async function readDirectArbitrageExecutionStatus({
         continue;
       }
       return { status: "ready", code: "ready", execution: await addUsdPrices(execution, strategy.reserveToken) };
-    } catch {
+    } catch (error) {
+      if (isArbitrageInfrastructureError(error)) checkComplete = false;
+      else if (!isArbitrageContractRevertError(error)) throw error;
       continue;
     }
   }
+  if (!checkComplete) return quoteUnavailable();
   if (gasRejected) {
     return {
       status: "waiting-gas",
@@ -355,6 +392,17 @@ export async function readDirectArbitrageExecutionStatus({
     };
   }
   return { status: "none", code: "no-profitable-route", error: "No profitable route." };
+}
+
+export async function readDirectArbitrageExecutionStatus(
+  input: Parameters<typeof readDirectArbitrageExecutionStatusUnchecked>[0],
+): Promise<DirectArbitrageExecutionStatus> {
+  try {
+    return await readDirectArbitrageExecutionStatusUnchecked(input);
+  } catch (error) {
+    if (isArbitrageInfrastructureError(error)) return quoteUnavailable();
+    throw error;
+  }
 }
 
 type StrategyV4 = Strategy & {
@@ -380,7 +428,7 @@ function v4Params(candidate: Candidate, feeReimbursementWei: bigint) {
   } as const;
 }
 
-export async function readDirectArbitrageExecutionStatusV4({
+async function readDirectArbitrageExecutionStatusV4Unchecked({
   owner,
   strategyId,
   executionAccount = owner,
@@ -483,22 +531,26 @@ export async function readDirectArbitrageExecutionStatusV4({
   }
 
   const bondState = await readBondState(strategy, client);
-  const [mintCandidate, redeemCandidate] = await Promise.all([
-    maximizeExecutable(available, (budget) =>
-      mintThenSell(
-        client,
-        strategy,
-        budget,
-        bondState,
-        0,
-        Number(rewardBps),
-      ),
+  const [mintSearch, redeemSearch] = await Promise.all([
+    searchArbitrageDirection(
+      available,
+      (budget) =>
+        mintThenSell(
+          client,
+          strategy,
+          budget,
+          bondState,
+          0,
+          Number(rewardBps),
+        ),
     ),
-    maximizeExecutable(available, (budget) =>
-      buyThenRedeem(client, strategy, budget, 0, Number(rewardBps)),
+    searchArbitrageDirection(
+      available,
+      (budget) =>
+        buyThenRedeem(client, strategy, budget, 0, Number(rewardBps)),
     ),
   ]);
-  const candidates = [mintCandidate, redeemCandidate]
+  const candidates = [mintSearch.candidate, redeemSearch.candidate]
     .filter((candidate): candidate is Candidate => Boolean(candidate))
     .filter(
       (candidate) =>
@@ -514,6 +566,7 @@ export async function readDirectArbitrageExecutionStatusV4({
           : 0,
     );
 
+  let checkComplete = mintSearch.complete && redeemSearch.complete;
   let feeRejected: DirectArbitrageExecutionQuote | null = null;
   for (const candidate of candidates) {
     try {
@@ -670,10 +723,13 @@ export async function readDirectArbitrageExecutionStatusV4({
         code: "ready",
         execution: await addUsdPrices(execution, strategy.reserveToken),
       };
-    } catch {
+    } catch (error) {
+      if (isArbitrageInfrastructureError(error)) checkComplete = false;
+      else if (!isArbitrageContractRevertError(error)) throw error;
       continue;
     }
   }
+  if (!checkComplete) return quoteUnavailable();
   if (feeRejected) {
     return {
       status: "waiting-gas",
@@ -687,4 +743,15 @@ export async function readDirectArbitrageExecutionStatusV4({
     code: "no-profitable-route",
     error: "No profitable route.",
   };
+}
+
+export async function readDirectArbitrageExecutionStatusV4(
+  input: Parameters<typeof readDirectArbitrageExecutionStatusV4Unchecked>[0],
+): Promise<DirectArbitrageExecutionStatus> {
+  try {
+    return await readDirectArbitrageExecutionStatusV4Unchecked(input);
+  } catch (error) {
+    if (isArbitrageInfrastructureError(error)) return quoteUnavailable();
+    throw error;
+  }
 }

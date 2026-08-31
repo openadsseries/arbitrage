@@ -53,7 +53,7 @@ type Preparation = {
   readBlock: string;
 };
 type RelayPayload = {
-  status?: "executed" | "ready" | "waiting-gas" | "none";
+  status?: "executed" | "ready" | "waiting-gas" | "unavailable" | "none";
   code?: ArbitrageExecutionReasonCode;
   hash?: `0x${string}`;
   execution?: DirectArbitrageExecutionQuote | null;
@@ -89,6 +89,7 @@ const PASSIVE_WATCH_REASONS = new Set([
   "Base is busy. Try again soon.",
   "Gas too high.",
   "Fees are higher than profit.",
+  "Price check unavailable.",
   "No profitable route.",
   "Not executable now.",
   "No route now.",
@@ -110,6 +111,8 @@ function relayWatchReason(reason: unknown) {
       return "Fees are higher than profit.";
     if (reason.payload.code === "no-profitable-route")
       return "No profitable route.";
+    if (reason.payload.code === "quote-unavailable")
+      return "Price check unavailable.";
     if (reason.payload.code === "no-permission") return "No available amount.";
     if (reason.payload.status === "none") return errorMessage(reason.payload.error, "Watching.");
     return errorMessage(reason.payload.error, "Watching.");

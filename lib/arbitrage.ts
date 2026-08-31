@@ -416,6 +416,7 @@ export type ArbitrageExecutionReasonCode =
   | "ready"
   | "fees-higher-than-profit"
   | "no-profitable-route"
+  | "quote-unavailable"
   | "not-configured"
   | "not-owner"
   | "inactive"

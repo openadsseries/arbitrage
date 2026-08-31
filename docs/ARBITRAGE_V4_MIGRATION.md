@@ -1,11 +1,19 @@
 # Arbitrage V4 migration
 
-Status: deployed on Base, control-path canary passed, feature gate off pending execution canary
+Status: deployed on Base, control and latest Base fork canaries passed, feature gate off
+pending an authenticated production RPC and live settlement canaries
 
 The Base control-path canary completed exact approval, strategy start, stop, and allowance
-revocation with no token movement. Current blocker: neither local signing wallet holds a
-supported Reserve Token. V3 remains active until a deliberately funded, tightly capped V4
-canary completes a profitable execution and verifies the resulting settlement.
+revocation with no token movement. A funded live hMT canary exposed an application bug:
+an incomplete RPC-backed assessment was reported as `no-profitable-route`. Cleanup restored
+zero active strategy and zero allowance without moving the user's MT, but that response is
+not accepted as a rejection canary. A latest-state Base fork then settled the retained
+`1,054.924057473303162625 MT` through `Buy then redeem` with fee reimbursement and
+protected owner profit. This proves the deployed contract path in an isolated fork, not a
+real Base settlement. Later live attempts correctly returned `quote-unavailable` and safely
+cleaned up, proving the corrected state model while also proving that rate-limited public
+RPCs cannot complete the bounded opportunity search reliably. V3 remains active until an
+authenticated Base RPC is configured and both live assessment canaries pass.
 
 ## Why V4 exists
 
@@ -50,11 +58,15 @@ inside the user's limits.
 8. A relay outage, missing role, insufficient relay ETH, stale quote, high fees, missing
    allowance, or insufficient liquidity is shown as its real state. It is never replaced
    by `Watching`, `Route found`, or a positive percentage.
-9. New strategies use V4 only after every release gate below passes.
-10. Existing V3 strategies are never silently migrated. They remain visible and can be
+9. A quote or RPC failure is `unavailable`, never `no-route` or `fees-too-high`. A
+   `no-route` result requires every searched direction to complete successfully.
+10. New strategies use V4 only after every release gate below passes.
+11. Existing V3 strategies are never silently migrated. They remain visible and can be
     stopped and revoked until the V3 balance and permission surface is drained.
-11. Deployment is contract first, configuration second, canary third, and GitHub
+12. Deployment is contract first, configuration second, canary third, and GitHub
     activation last. A local Vercel CLI deployment is not part of this release path.
+13. Production V4 relay and watcher require an authenticated Base RPC. Public Base,
+    PublicNode, and Blast endpoints are canary diagnostics only, never production backing.
 
 ## One source of truth
 
@@ -78,14 +90,14 @@ after a fresh simulation.
 
 ## Version policy
 
-| Surface | V3 during migration | V4 after canary |
-| --- | --- | --- |
-| Create strategy | Disabled for new strategies | Primary |
-| Read active strategy | Supported | Supported |
-| Stop strategy | Supported | Supported |
-| Revoke allowance | Supported | Supported |
-| Execute strategy | Drain only; no new activation | Primary |
-| Confirmed history | Merged and tagged internally | Merged and tagged internally |
+| Surface              | V3 during migration           | V4 after canary              |
+| -------------------- | ----------------------------- | ---------------------------- |
+| Create strategy      | Disabled for new strategies   | Primary                      |
+| Read active strategy | Supported                     | Supported                    |
+| Stop strategy        | Supported                     | Supported                    |
+| Revoke allowance     | Supported                     | Supported                    |
+| Execute strategy     | Drain only; no new activation | Primary                      |
+| Confirmed history    | Merged and tagged internally  | Merged and tagged internally |
 
 Executor versions are an implementation detail in normal UI. They appear only in
 diagnostics, transaction links, and migration support.
@@ -105,7 +117,8 @@ V4 must not receive production traffic until all gates pass in order:
 4. **Application**: V4 ABI, events, reads, writes, relay, keeper, Portfolio, market detail,
    and Markets all use the normalized assessment. V3 recovery remains intact.
 5. **Readiness**: deployed bytecode and immutable addresses match; roles and pause state
-   match; relay balance is sufficient; a live fee quote includes L1 and L2 fees.
+   match; relay balance is sufficient; an authenticated Base RPC and fallback are configured;
+   a live fee quote includes L1 and L2 fees.
 6. **Canary**: one allowlisted wallet completes a deliberately small strategy, one stop,
    one revoke, and both a profitable and a rejected execution without inconsistent UI.
 7. **GitHub preview**: production environment variables are present before the commit is
@@ -137,11 +150,12 @@ Any failed gate stops the release. Passing an earlier gate does not waive a late
 - Do not poll a heavy relay simulation merely to display a market row.
 - Do not deploy through a local Vercel CLI. Production deploys come from the reviewed
   GitHub commit and the connected Vercel project.
+- Do not activate V4 with a rate-limited public RPC or treat RPC retry as profitability.
 - Do not retire V3 reads, stop, or revoke paths while a V3 strategy or allowance remains.
 
 ## Definition of done
 
 The V4 migration is complete only when a user can start once, leave the browser, have a
-persistent keeper execute whenever a fresh after-cost assessment is `ready`, see the same
+server-side watcher execute whenever a fresh after-cost assessment is `ready`, see the same
 state on every page, receive protected Reserve Token profit, and stop or revoke without
 operator cooperation. Until then, V4 is a candidate rather than the production executor.

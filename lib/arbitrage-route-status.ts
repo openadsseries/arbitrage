@@ -43,7 +43,11 @@ export function buildArbitrageRouteChecks({
   );
   const gasWaiting = includesReason(reason, ["Fees are higher than profit", "Gas too high", "Waiting for gas"]);
   const routeWaiting = includesReason(reason, ["No profitable route", "No route", "Not executable"]);
-  const networkWaiting = reason.includes("Base is busy");
+  const networkWaiting = includesReason(reason, [
+    "Base is busy",
+    "Price check unavailable",
+    "Base read failed",
+  ]);
   const setupBlocked = includesReason(reason, [
     "Relay setup needed",
     "Relay not configured",
@@ -56,7 +60,15 @@ export function buildArbitrageRouteChecks({
         : BigInt(quote.rewardWethRaw) >= BigInt(quote.requiredWethRaw)),
   );
 
-  const costs: ArbitrageRouteCheck = gasWaiting
+  const costs: ArbitrageRouteCheck = networkWaiting
+    ? {
+        key: "costs",
+        label: "Costs",
+        value: "Check unavailable",
+        tone: "waiting",
+        detail: "The latest price and fee check did not complete. It will retry.",
+      }
+    : gasWaiting
     ? {
         key: "costs",
         label: "Costs",

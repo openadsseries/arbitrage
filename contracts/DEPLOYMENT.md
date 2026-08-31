@@ -15,7 +15,11 @@ receive production traffic until the remaining canary release gates below pass.
 - Guardian role: none
 - Activation: disabled; V3 remains the production executor
 - Control-path canary: passed on Base for exact approval, strategy start, stop, and allowance revoke
-- Execution canary blocker: the deployer and relay currently hold no supported Reserve Token
+- Live assessment canary: invalid; an RPC-backed check was misclassified as `no-profitable-route`
+- Reliable rejection canary: pending a complete fresh quote that proves the exact blocked reason
+- Latest Base fork execution canary: passed with retained MT through `Buy then redeem`
+- Profitable execution canary: pending a live route that retains user profit after Base costs
+- Infrastructure gate: blocked until an authenticated production Base RPC is configured
 
 Control-path canary transactions:
 
@@ -24,6 +28,61 @@ Control-path canary transactions:
 - Stop strategy `#1`: `0x30c46be9914a77a83c6cd36b5b629c8a2236f4943415a882738084c8639069ec`
 - Revoke allowance: `0x6cd28924911bfcca88752ffe1e7e2af22a1dd899bfb837d74ccae356f56bea1e`
 - Final state: `activeStrategyId = 0`, V4 MT allowance `= 0`
+
+Invalid live assessment canary (funds safely cleaned up):
+
+- Budget acquired: `1054.924057473303162625 MT` for a `0.00095 ETH` capped buy
+- Approve exact MT: `0x7a3d97339439b8ddaee2a1e51fff981b670447d420b24432fd8153e47993636a`
+- Start strategy `#6`: `0x727b9de2834b237f1db8ed083f04593e26b60762e3b0a2831ac2fdc206bbf726`
+- Relay response: `no-profitable-route`; later review found that quote/RPC failures could
+  collapse into this code, so the response does not prove that no profitable route existed
+- Stop strategy `#6`: `0x736f1f8cdb5412c7cb6a05ed00eae4507372ad87fecd5a6cfcd83a8e35c4e09f`
+- Revoke allowance: `0x241f760e2edbcd028467610fc2e6725e2ec6be04057d1211b8c528dff642e3e5`
+- Final state: `activeStrategyId = 0`, V4 MT allowance `= 0`, acquired MT remains in the owner wallet
+
+Before another live canary, the relay must return `quote-unavailable` for any incomplete
+price, route, simulation, or fee read. `no-profitable-route` is valid only when both route
+searches complete, while `fees-higher-than-profit` requires a complete candidate and fee
+assessment. A dedicated authenticated Base RPC is a release requirement for that rerun.
+
+Latest Base fork execution canary:
+
+- Fork block: `50680838`
+- Budget: `1054.924057473303162625 MT`
+- Direction: `Buy then redeem`
+- Fee reimbursement claim: `0.000005 ETH`, below the contract's Base fee upper bound
+- Result: owner retained positive MT profit, relay received reimbursement and incentive,
+  remaining strategy volume became zero, and allowance became zero
+- Scope: isolated fork only; no production transaction was submitted
+
+Correctly classified public-RPC canaries (funds safely cleaned up):
+
+- Strategy `#7`: exact approval and start succeeded; PublicNode assessment returned
+  `quote-unavailable`; stop and revoke succeeded.
+- Strategy `#7` approve/start/stop/revoke: `0x48dd8d6ea7fba31d4dc9c8a4fcf7b73fa5716d6ce407620e1627c26fb8201e77`,
+  `0x41d26d5c523b0217954e12ac2b5eff928a15bda641e239ef290ec55363014596`,
+  `0x1bef989c63a125fa12177866a1709bf7c331d547d24c80f0f1e3bcbefc70a9a1`,
+  `0x743ec1cdd98529c17929e9f3c4916d3b6a4e2735a9ea79df462db11a7e6b6bee`.
+- Strategy `#8`: exact approval and start succeeded; Base public RPC rate-limited the
+  assessment; Blast cleanup restored zero strategy and zero allowance.
+- Strategy `#8` approve/start/stop/revoke: `0xa8362d1db0b022000cd933c728cef4590fc7e0388e6086d18210c3a9bf862f81`,
+  `0xeef17fd60f8781beb163e68b04f8bfaefa51585bd6fc2f84b164e3053ff21d0c`,
+  `0x1d291ef563d6384fa466c0ae455e2d7721728c92d2207e2bf78423feb5bda806`,
+  `0x691d19a1dc9a3e02809c6165bfc149cc9f8a5a4dd42093d9404d0820b7b94aa3`.
+- Strategy `#9`: relay preflight passed after multicall and ordered fallback were added,
+  but all three bounded assessment attempts returned `quote-unavailable`.
+- Strategy `#9` approve: `0xc3a07785e9f189e0606b4ca1d470ceb3941dd7f5d84ea0f7b1cdf21de89713b3`
+- Strategy `#9` start: `0x5a13e9d43f000a3802a06a6f645671be34d60dc4d8c33387c878f0595a64da28`
+- Strategy `#9` stop: `0x12620eceabe7879a340292d5da963a45d76995eec58e116baa566957325c5066`
+- Strategy `#9` revoke: `0xe81e46ef7433dee5c655d0ce9d13311c1415ad2e3e82109d9ef66359e310fd3f`
+- Final cross-check at Base block `50681672`: active strategy `0`, V4 MT allowance `0`,
+  MT balance `1054.924057473303162625`, strategy `#9` execution count `0`.
+
+These are infrastructure canaries, not economic rejection canaries. They prove that an
+incomplete assessment is no longer shown as `no-profitable-route` or `fees-higher-than-profit`.
+They do not satisfy the live profitable or complete rejection release gates. The relay and
+watcher now batch parallel reads, use only explicitly configured fallbacks, and refuse V4
+production activation unless a non-public RPC is acknowledged as production-ready.
 
 The binding objective, compatibility policy, release gates, rollback rules, and prohibited
 shortcuts are defined in [`../docs/ARBITRAGE_V4_MIGRATION.md`](../docs/ARBITRAGE_V4_MIGRATION.md).
@@ -101,6 +160,9 @@ Set the following in the connected Vercel project while keeping the feature gate
 NEXT_PUBLIC_ARBITRAGE_EXECUTOR_V4=<verified address>
 ARBITRAGE_EXECUTOR_V4_DEPLOYMENT_BLOCK=<deployment block>
 NEXT_PUBLIC_ARBITRAGE_V4_ENABLED=false
+BASE_RPC_URL=<authenticated Base RPC>
+BASE_RPC_FALLBACK_URLS=<authenticated fallback, optional>
+ARBITRAGE_RPC_PRODUCTION_READY=true
 ```
 
 Keep the V3 address and block configured for existing strategy reads, stop, revoke, and
@@ -114,11 +176,13 @@ after-cost execution, one profitable execution, confirmed history, stop, and all
 revoke. The Markets row, detail page, Portfolio, relay response, and transaction event
 must report the same state.
 
-### 6. Start the persistent V4 keeper
+### 6. Start the V4 watcher
 
-Run `npm run keeper:v4` on an always-on host outside Vercel. The keeper holds no key; it
-calls the canonical relay endpoint, which performs a fresh assessment before signing.
-Confirm that automation continues after the user closes the browser.
+Enable the scheduled GitHub Actions watcher after its production URL and executor address
+are reviewed. It holds no key, reads Base directly, and calls the canonical relay endpoint
+only when an active strategy exists. The relay performs a fresh assessment before signing.
+Confirm that automation continues after the user closes the browser without adding Vercel
+polling load while there are no active strategies.
 
 ### 7. Activate through GitHub
 

@@ -8,6 +8,7 @@
     "start": "next start",
     "keeper": "node --env-file=.env.local scripts/arbitrage-keeper-v3.mjs",
     "keeper:v4": "node --env-file=.env.local scripts/arbitrage-keeper-v4.mjs",
+    "canary:v4": "node --env-file=.env.local scripts/arbitrage-v4-canary.mjs",
     "keeper:continuous": "node --env-file=.env.local scripts/arbitrage-keeper-v3.mjs",
     "keeper:one-shot": "node --env-file=.env.local scripts/arbitrage-keeper-v2.mjs",
     "keeper:legacy": "node --env-file=.env.local scripts/arbitrage-keeper.mjs",

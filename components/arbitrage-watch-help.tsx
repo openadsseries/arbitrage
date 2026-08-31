@@ -78,6 +78,13 @@ export function arbitrageWatchCopy(reason: string) {
       action: "Keep the page open. It retries automatically.",
     };
   }
+  if (reason === "Price check unavailable." || reason === "Base read failed. Try again.") {
+    return {
+      title: "Check unavailable",
+      meaning: "The latest price and fee check did not complete, so no route decision was made.",
+      action: "Keep the page open. It retries automatically.",
+    };
+  }
   if (reason === "No profitable route." || reason === "No route now." || reason === "Not executable now.") {
     return {
       title: "Watching",
@@ -101,6 +108,7 @@ export function arbitrageWatchLabel(reason: string) {
   if (title === "Paused today") return "Paused";
   if (title === "Fees too high") return "Fees too high";
   if (title === "Network busy") return "Network wait";
+  if (title === "Check unavailable") return "Retrying";
   return title;
 }
 
@@ -110,6 +118,7 @@ export function arbitrageWatchPanelTitle(reason: string) {
   if (title === "Relay needs gas") return "Relay needs gas.";
   if (title === "Paused today") return "Paused today.";
   if (title === "Fees too high") return "Fees are higher than profit.";
+  if (title === "Check unavailable") return "Price check unavailable.";
   return "Watching prices.";
 }
 
