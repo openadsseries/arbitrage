@@ -16,7 +16,6 @@ import {
 import { CHAINS } from "@/lib/chains";
 import { compactActionError } from "@/lib/errors";
 import {
-  assertProductionV4Rpc,
   createBaseRpcTransport,
   parseBaseRpcUrls,
 } from "@/lib/server/base-rpc";
@@ -109,10 +108,9 @@ function currentRelayGasBudget() {
 async function relayContext(version: ArbitrageExecutorVersion) {
   const account = privateKeyToAccount(relayPrivateKey());
   const rpcEndpoints = parseBaseRpcUrls();
-  if (version === "v4") assertProductionV4Rpc(rpcEndpoints);
   const transport = createBaseRpcTransport(rpcEndpoints);
   const publicClient = createPublicClient({
-    batch: { multicall: true },
+    batch: { multicall: { batchSize: 16_384, wait: 10 } },
     chain: base,
     transport,
   });

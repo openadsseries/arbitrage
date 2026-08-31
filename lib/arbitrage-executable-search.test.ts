@@ -14,7 +14,8 @@ describe("arbitrage direction search", () => {
     const result = await searchArbitrageDirection(10n, async () => {
       throw new Error("RPC request failed: 429 Too Many Requests");
     });
-    expect(result).toEqual({ candidate: null, complete: false });
+    expect(result).toMatchObject({ candidate: null, complete: false });
+    expect(result.infrastructureError).toBeInstanceOf(Error);
   });
 
   it("keeps a valid candidate when other sampled amounts have no route", async () => {

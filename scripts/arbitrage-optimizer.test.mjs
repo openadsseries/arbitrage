@@ -43,6 +43,20 @@ describe("bounded arbitrage amount search", () => {
     expect(result).toBeNull();
   });
 
+  it("checks coarse quote sizes concurrently for RPC batching", async () => {
+    let inFlight = 0;
+    let maximumInFlight = 0;
+    await maximizeExecutable(1_000n, async (amount) => {
+      inFlight += 1;
+      maximumInFlight = Math.max(maximumInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      return { amount, net: amount };
+    });
+
+    expect(maximumInFlight).toBeGreaterThan(1);
+  });
+
   it("propagates infrastructure failures when the caller requires a complete check", async () => {
     await expect(
       maximizeExecutable(

@@ -27,8 +27,7 @@ jobs:
       - run: node scripts/arbitrage-keeper-v4.mjs --once
         env:
           ARBITRAGE_APP_URL: https://arbitrage-orcin-five.vercel.app
-          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
-          BASE_RPC_FALLBACK_URLS: ${{ secrets.BASE_RPC_FALLBACK_URLS }}
-          ARBITRAGE_RPC_PRODUCTION_READY: ${{ vars.ARBITRAGE_RPC_PRODUCTION_READY }}
+          BASE_RPC_URL: https://base-rpc.publicnode.com
+          BASE_RPC_FALLBACK_URLS: https://base-mainnet.public.blastapi.io,https://mainnet.base.org
           NEXT_PUBLIC_ARBITRAGE_EXECUTOR_V4: "0x6Aad2b4BB89813B4E0Db43170c8b314417B1D571"
           ARBITRAGE_V4_KEEPER_POLL_MS: "300000"

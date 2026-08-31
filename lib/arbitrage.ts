@@ -1,4 +1,10 @@
-import { getAddress, isAddress, parseAbi, parseUnits, type Address } from "viem";
+import {
+  getAddress,
+  isAddress,
+  parseAbi,
+  parseUnits,
+  type Address,
+} from "viem";
 import { calculateV3ProfitSplit } from "./arbitrage-economics.mjs";
 import type { ChainKey } from "@/lib/chains";
 
@@ -48,6 +54,27 @@ export const ARBITRAGE_EXECUTOR_V3_ABI = parseAbi([
 ]);
 
 export const ARBITRAGE_EXECUTOR_V4_ABI = parseAbi([
+  "error Reentered()",
+  "error ZeroAddress()",
+  "error InvalidConfiguration()",
+  "error UnknownMintClubToken()",
+  "error StrategyAlreadyActive()",
+  "error NotStrategyOwner()",
+  "error UnauthorizedExecutor()",
+  "error UnauthorizedOperatorManager()",
+  "error InvalidPendingExecutor()",
+  "error ContractPaused()",
+  "error StrategyInactive()",
+  "error StrategyExpired()",
+  "error AmountOutsidePermission()",
+  "error AlreadyExecutedThisBlock()",
+  "error MinimumProfitNotMet(uint256 actualProfit,uint256 requiredProfit)",
+  "error FeeLimitExceeded(uint256 actualFee,uint256 maximumFee)",
+  "error FeeClaimExceedsUpperBound(uint256 claimedFee,uint256 maximumFee)",
+  "error FeeOracleUnavailable()",
+  "error MissingRoute()",
+  "error UnsupportedTokenTransfer(address token,uint256 expected,uint256 received)",
+  "error TokenCallFailed(address token)",
   "function startStrategy(address hToken,uint256 maxReservePerExecution,uint256 totalVolume,uint256 minProfitReserve,uint16 minProfitBps,uint256 maxFeeReimbursementReserve,uint40 validUntil) returns (uint256 strategyId)",
   "function stopStrategy(uint256 strategyId)",
   "function execute(uint256 strategyId,uint8 direction,(uint256 amountInReserve,uint256 hAmountForMint,uint256 minimumHypedOut,uint256 minimumBondOut,uint256 minimumReserveOut,uint256 feeReimbursementWei) params) returns (uint256 ownerReturnReserve)",
@@ -310,8 +337,12 @@ export function reserveAmountForUsdBenchmark(input: {
   if (!Number.isFinite(reserveUnits) || reserveUnits <= 0) {
     throw new Error("Reserve Token USD price is unavailable.");
   }
-  const amount = parseUnits(reserveUnits.toFixed(precision), input.reserveDecimals);
-  if (amount <= 0n) throw new Error("The USD benchmark is too small for this token.");
+  const amount = parseUnits(
+    reserveUnits.toFixed(precision),
+    input.reserveDecimals,
+  );
+  if (amount <= 0n)
+    throw new Error("The USD benchmark is too small for this token.");
   return amount;
 }
 

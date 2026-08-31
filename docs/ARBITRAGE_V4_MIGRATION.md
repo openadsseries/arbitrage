@@ -1,7 +1,7 @@
 # Arbitrage V4 migration
 
-Status: deployed on Base, control and latest Base fork canaries passed, feature gate off
-pending an authenticated production RPC and live settlement canaries
+Status: deployed on Base, control, latest Base fork, and public-RPC live profitable
+canaries passed; feature gate remains off pending the complete rejection and UI gates
 
 The Base control-path canary completed exact approval, strategy start, stop, and allowance
 revocation with no token movement. A funded live hMT canary exposed an application bug:
@@ -11,9 +11,12 @@ not accepted as a rejection canary. A latest-state Base fork then settled the re
 `1,054.924057473303162625 MT` through `Buy then redeem` with fee reimbursement and
 protected owner profit. This proves the deployed contract path in an isolated fork, not a
 real Base settlement. Later live attempts correctly returned `quote-unavailable` and safely
-cleaned up, proving the corrected state model while also proving that rate-limited public
-RPCs cannot complete the bounded opportunity search reliably. V3 remains active until an
-authenticated Base RPC is configured and both live assessment canaries pass.
+cleaned up, proving the corrected state model. Review then found that the V4 relay was still
+quoting the legacy V3 WETH route and evaluating bounded amounts sequentially. The V4 relay
+now quotes the same router path the contract executes and batches each search layer. Latest
+public Base reads complete without a private RPC subscription. A live public-RPC strategy
+then settled `Buy then redeem`, leaving the owner with protected net MT profit and clearing
+the strategy and allowance. V3 remains active until the complete rejection and UI gates pass.
 
 ## Why V4 exists
 
@@ -65,8 +68,8 @@ inside the user's limits.
     stopped and revoked until the V3 balance and permission surface is drained.
 12. Deployment is contract first, configuration second, canary third, and GitHub
     activation last. A local Vercel CLI deployment is not part of this release path.
-13. Production V4 relay and watcher require an authenticated Base RPC. Public Base,
-    PublicNode, and Blast endpoints are canary diagnostics only, never production backing.
+13. Production V4 must work with ordered public Base RPC endpoints. A paid endpoint may be
+    added later for redundancy, but it is not a correctness or activation requirement.
 
 ## One source of truth
 
@@ -117,8 +120,8 @@ V4 must not receive production traffic until all gates pass in order:
 4. **Application**: V4 ABI, events, reads, writes, relay, keeper, Portfolio, market detail,
    and Markets all use the normalized assessment. V3 recovery remains intact.
 5. **Readiness**: deployed bytecode and immutable addresses match; roles and pause state
-   match; relay balance is sufficient; an authenticated Base RPC and fallback are configured;
-   a live fee quote includes L1 and L2 fees.
+   match; relay balance is sufficient; ordered public RPC fallbacks are configured; a live
+   fee quote includes L1 and L2 fees.
 6. **Canary**: one allowlisted wallet completes a deliberately small strategy, one stop,
    one revoke, and both a profitable and a rejected execution without inconsistent UI.
 7. **GitHub preview**: production environment variables are present before the commit is
@@ -150,7 +153,7 @@ Any failed gate stops the release. Passing an earlier gate does not waive a late
 - Do not poll a heavy relay simulation merely to display a market row.
 - Do not deploy through a local Vercel CLI. Production deploys come from the reviewed
   GitHub commit and the connected Vercel project.
-- Do not activate V4 with a rate-limited public RPC or treat RPC retry as profitability.
+- Do not turn an RPC failure or retry into a profitability result.
 - Do not retire V3 reads, stop, or revoke paths while a V3 strategy or allowance remains.
 
 ## Definition of done

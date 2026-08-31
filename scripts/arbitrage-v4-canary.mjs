@@ -131,7 +131,7 @@ const primaryTransport =
     ? transactionTransports[0]
     : fallback(transactionTransports, { rank: false, retryCount: 0 });
 const primaryPublicClient = createPublicClient({
-  batch: { multicall: true },
+  batch: { multicall: { batchSize: 16_384, wait: 10 } },
   chain: base,
   transport: primaryTransport,
 });

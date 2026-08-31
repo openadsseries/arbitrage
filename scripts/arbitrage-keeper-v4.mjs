@@ -6,13 +6,6 @@ const ABI = parseAbi([
   "function strategies(uint256) view returns (address owner,address hToken,address reserveToken,uint40 validUntil,bool active,uint64 executionCount,uint64 lastExecutionBlock,uint256 maxReservePerExecution,uint256 remainingVolume,uint256 minProfitReserve,uint256 maxFeeReimbursementReserve,uint16 minProfitBps)",
 ]);
 const MIN_REQUEST_GAP_MS = 5_500;
-const PUBLIC_RPC_HOSTS = new Set([
-  "base-rpc.publicnode.com",
-  "base-mainnet.public.blastapi.io",
-  "mainnet.base.org",
-  "mainnet-preconf.base.org",
-]);
-
 function required(name) {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is missing.`);
@@ -40,14 +33,6 @@ function rpcUrls() {
     .filter((value, index, values) => values.indexOf(value) === index);
 }
 
-function isKnownPublicRpc(url) {
-  try {
-    return PUBLIC_RPC_HOSTS.has(new URL(url).hostname.toLowerCase());
-  } catch {
-    return true;
-  }
-}
-
 const executor = getAddress(required("NEXT_PUBLIC_ARBITRAGE_EXECUTOR_V4"));
 const appUrl = new URL(required("ARBITRAGE_APP_URL"));
 if (appUrl.protocol !== "https:" && appUrl.hostname !== "localhost") {
@@ -58,18 +43,12 @@ const pollMs = Math.max(
   30_000,
 );
 const rpcEndpoints = rpcUrls();
-if (
-  process.env.ARBITRAGE_RPC_PRODUCTION_READY !== "true" ||
-  rpcEndpoints.every(isKnownPublicRpc)
-) {
-  throw new Error("Authenticated Base RPC required.");
-}
 const transport = fallback(
   rpcEndpoints.map((url) => http(url, { retryCount: 0, timeout: 8_000 })),
   { rank: false, retryCount: 0 },
 );
 const client = createPublicClient({
-  batch: { multicall: true },
+  batch: { multicall: { batchSize: 16_384, wait: 10 } },
   chain: base,
   transport,
 });

@@ -12,6 +12,7 @@ type ExecutableCandidate = {
 export type ArbitrageDirectionSearch<T> = {
   candidate: T | null;
   complete: boolean;
+  infrastructureError?: unknown;
 };
 
 export async function searchArbitrageDirection<T extends ExecutableCandidate>(
@@ -27,7 +28,7 @@ export async function searchArbitrageDirection<T extends ExecutableCandidate>(
     return { candidate, complete: true };
   } catch (error) {
     if (isArbitrageInfrastructureError(error)) {
-      return { candidate: null, complete: false };
+      return { candidate: null, complete: false, infrastructureError: error };
     }
     throw error;
   }

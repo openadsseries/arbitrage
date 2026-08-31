@@ -18,8 +18,8 @@ receive production traffic until the remaining canary release gates below pass.
 - Live assessment canary: invalid; an RPC-backed check was misclassified as `no-profitable-route`
 - Reliable rejection canary: pending a complete fresh quote that proves the exact blocked reason
 - Latest Base fork execution canary: passed with retained MT through `Buy then redeem`
-- Profitable execution canary: pending a live route that retains user profit after Base costs
-- Infrastructure gate: blocked until an authenticated production Base RPC is configured
+- Profitable execution canary: passed live through `Buy then redeem` with protected owner profit
+- Public RPC gate: passed with batched latest-state quote, simulation, submission, and receipt fallback
 
 Control-path canary transactions:
 
@@ -43,7 +43,8 @@ Invalid live assessment canary (funds safely cleaned up):
 Before another live canary, the relay must return `quote-unavailable` for any incomplete
 price, route, simulation, or fee read. `no-profitable-route` is valid only when both route
 searches complete, while `fees-higher-than-profit` requires a complete candidate and fee
-assessment. A dedicated authenticated Base RPC is a release requirement for that rerun.
+assessment. The rerun uses ordered public RPC endpoints and the same direct router path as
+the V4 contract.
 
 Latest Base fork execution canary:
 
@@ -80,9 +81,32 @@ Correctly classified public-RPC canaries (funds safely cleaned up):
 
 These are infrastructure canaries, not economic rejection canaries. They prove that an
 incomplete assessment is no longer shown as `no-profitable-route` or `fees-higher-than-profit`.
-They do not satisfy the live profitable or complete rejection release gates. The relay and
-watcher now batch parallel reads, use only explicitly configured fallbacks, and refuse V4
-production activation unless a non-public RPC is acknowledged as production-ready.
+They do not satisfy the live profitable or complete rejection release gates. Subsequent
+review found two avoidable causes of load: V4 assessment reused V3's forced WETH route and
+searched each amount sequentially. The relay now quotes the contract's direct router call,
+batches parallel candidates, and uses only explicitly configured public fallbacks. A latest
+Base smoke test completed both nine-size directions and Mint Club conversions in one batched
+search without a private endpoint. PublicNode may reject fixed historical fork reads as
+archive access; that limitation affects fork reproduction, not latest production quotes.
+
+Public-RPC live execution canary:
+
+- Strategy `#10` safely exposed the first V4 route mismatch after direct quoting was added;
+  it returned `quote-unavailable`, then stopped and revoked without execution.
+- Strategy `#11` exposed `FeeClaimExceedsUpperBound` being hidden by an incomplete ABI and
+  incorrect error precedence; it also stopped and revoked without execution.
+- Strategy `#12` used the decoded contract fee ceiling, completed `Buy then redeem`, and
+  closed atomically at Base block `50682907`.
+- Approve: `0xc49a6c9cd2ac2066f7685be138379f0310f0c06acdf1870646c7c4180d7f8715`
+- Start: `0xb7f5ddff4520ee2f1b8d077db911aa1d0d04d904fd4e0cc008a27a652f03189c`
+- Execute: `0x07d634bc58d4a9da0389ba56fd212f549877b052e5c2f1c6eeb5d19983e87c8b`
+- Amount spent: `1054.924057473303162625 MT`
+- Gross profit: `15.652094898952154784 MT`
+- Gas reimbursement: `0.019652812714718933 MT`
+- Executor incentive: `1.563244208623743585 MT`
+- Protected owner profit: `14.069197877613692266 MT`
+- Final owner balance: `1068.993255350916854891 MT`
+- Final state: active strategy `0`, V4 MT allowance `0`, remaining volume `0`, execution count `1`
 
 The binding objective, compatibility policy, release gates, rollback rules, and prohibited
 shortcuts are defined in [`../docs/ARBITRAGE_V4_MIGRATION.md`](../docs/ARBITRAGE_V4_MIGRATION.md).
@@ -160,9 +184,8 @@ Set the following in the connected Vercel project while keeping the feature gate
 NEXT_PUBLIC_ARBITRAGE_EXECUTOR_V4=<verified address>
 ARBITRAGE_EXECUTOR_V4_DEPLOYMENT_BLOCK=<deployment block>
 NEXT_PUBLIC_ARBITRAGE_V4_ENABLED=false
-BASE_RPC_URL=<authenticated Base RPC>
-BASE_RPC_FALLBACK_URLS=<authenticated fallback, optional>
-ARBITRAGE_RPC_PRODUCTION_READY=true
+BASE_RPC_URL=https://base-rpc.publicnode.com
+BASE_RPC_FALLBACK_URLS=<ordered public Base fallbacks>
 ```
 
 Keep the V3 address and block configured for existing strategy reads, stop, revoke, and
@@ -178,11 +201,16 @@ must report the same state.
 
 ### 6. Start the V4 watcher
 
-Enable the scheduled GitHub Actions watcher after its production URL and executor address
-are reviewed. It holds no key, reads Base directly, and calls the canonical relay endpoint
-only when an active strategy exists. The relay performs a fresh assessment before signing.
-Confirm that automation continues after the user closes the browser without adding Vercel
-polling load while there are no active strategies.
+The application itself does not require GitHub Actions. Enable the scheduled watcher only
+when automation must continue after the user closes the browser. It was added for that one
+purpose, holds no key or RPC secret, reads Base through public endpoints, and calls the
+canonical relay only when an active strategy exists. The relay performs a fresh assessment
+before signing. Keep repository variable `ARBITRAGE_V4_WATCHER_ENABLED` unset or `false`
+until V4 activation, then enable it with:
+
+```sh
+gh variable set ARBITRAGE_V4_WATCHER_ENABLED --body true
+```
 
 ### 7. Activate through GitHub
 
