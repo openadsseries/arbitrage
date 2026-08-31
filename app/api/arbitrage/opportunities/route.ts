@@ -1,6 +1,10 @@
 import { getAddress, isAddress } from "viem";
 import { z } from "zod";
-import { assessPublicArbitrageOpportunity } from "@/lib/arbitrage";
+import {
+  MARKET_SCAN_MAX_USD,
+  MARKET_SCAN_MIN_USD,
+  assessPublicArbitrageOpportunity,
+} from "@/lib/arbitrage";
 import {
   MAX_PUBLIC_ARBITRAGE_QUOTE,
   readCachedArbitrageBenchmarkOpportunity,
@@ -16,11 +20,20 @@ import {
 export const dynamic = "force-dynamic";
 
 const tokenSchema = z.string().refine(isAddress, "Enter a valid Hyped Token address.");
+const benchmarkUsdSchema = z
+  .number()
+  .finite()
+  .min(MARKET_SCAN_MIN_USD, "Enter a scan budget of at least $0.01.")
+  .max(MARKET_SCAN_MAX_USD, "Enter a scan budget up to $10,000.");
 const itemSchema = z.union([
-  z.object({ token: tokenSchema, mode: z.literal("benchmark"), benchmarkUsd: z.literal(10) }),
   z.object({
     token: tokenSchema,
-    mode: z.literal("exact"),
+    mode: z.literal("benchmark"),
+    benchmarkUsd: benchmarkUsdSchema,
+  }),
+  z.object({
+    token: tokenSchema,
+    mode: z.enum(["exact", "optimize"]),
     amountRaw: z.string().regex(/^\d+$/, "Enter a valid Reserve Token budget.").refine(
       (value) => BigInt(value) > 0n && BigInt(value) <= MAX_PUBLIC_ARBITRAGE_QUOTE,
       "Enter a valid Reserve Token budget.",
@@ -69,7 +82,7 @@ export async function POST(request: Request) {
         try {
           const opportunity = item.mode === "benchmark"
             ? await readCachedArbitrageBenchmarkOpportunity(token, item.benchmarkUsd)
-            : await readCachedArbitrageOpportunity(token, item.amountRaw, "exact");
+            : await readCachedArbitrageOpportunity(token, item.amountRaw, item.mode);
           return {
             token,
             assessment: assessPublicArbitrageOpportunity(opportunity),
@@ -106,7 +119,7 @@ export async function POST(request: Request) {
         error:
           reason instanceof Error
             ? reason.message
-            : "The price gaps could not be checked.",
+            : "The route returns could not be checked.",
       },
       { status: 400 },
     );

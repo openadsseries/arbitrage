@@ -147,7 +147,7 @@ describe("arbitrage opportunity math", () => {
     expect(selectDisplayedArbitrageRoute(false, null, preview)).toBe(preview);
   });
 
-  it("classifies a large pre-gas return as a price gap, not execution readiness", () => {
+  it("classifies a large pre-gas return as an estimate, not execution readiness", () => {
     const route = calculateArbitrageRoute({
       direction: "Mint then sell",
       amountIn: 100_000_000n,
@@ -182,12 +182,70 @@ describe("arbitrage opportunity math", () => {
       quotedAt: 1,
     });
 
-    expect(assessment.stage).toBe("estimated-return");
+    if (assessment.stage !== "estimated-return")
+      throw new Error("Expected an estimated return.");
     expect(assessment.gapBps).toBe(9_932);
     expect(assessment.quoteMode).toBe("exact");
     expect(assessment.benchmarkUsd).toBe(10);
+    expect(assessment.maxBudgetRaw).toBe("100000000");
+    expect(assessment.bestAmountRaw).toBe("100000000");
     expect(assessment.verification).toBe("estimated");
     expect(assessment).not.toHaveProperty("ready");
     expect(assessment).not.toHaveProperty("positive");
+  });
+
+  it("separates the user's max budget from the best executable size", () => {
+    const best = calculateArbitrageRoute({
+      direction: "Mint then sell",
+      amountIn: 25n,
+      amountOut: 30n,
+      limit: 100n,
+      protocolFeeBps: 0,
+      executorRewardBps: 2_000,
+    });
+    const fullBudgetLoss = calculateArbitrageRoute({
+      direction: "Mint then sell",
+      amountIn: 100n,
+      amountOut: 90n,
+      limit: 100n,
+      protocolFeeBps: 0,
+      executorRewardBps: 2_000,
+    });
+
+    const assessment = assessPublicArbitrageOpportunity({
+      chain: "base",
+      hToken: "0x0000000000000000000000000000000000000001",
+      hSymbol: "hMT",
+      reserveToken: "0x0000000000000000000000000000000000000002",
+      reserveSymbol: "MT",
+      reserveDecimals: 18,
+      quoteMode: "optimize",
+      benchmarkUsd: null,
+      checkedAmountRaw: "100",
+      hAmountRaw: "10",
+      protocolFeeBps: 0,
+      executorRewardBps: 2_000,
+      priceBasis: {
+        reserveUsd: null,
+        mintClubUsd: null,
+        poolUsd: null,
+        hAmountRaw: null,
+      },
+      bestDirection: best.direction,
+      routes: [best, fullBudgetLoss],
+      curveSamples: [
+        { budgetRaw: "25", hAmountRaw: "10", routes: [best] },
+        { budgetRaw: "100", hAmountRaw: "40", routes: [fullBudgetLoss] },
+      ],
+      readBlock: "1",
+      quotedAt: 1,
+    });
+
+    if (assessment.stage !== "estimated-return")
+      throw new Error("Expected an estimated return.");
+    expect(assessment.quoteMode).toBe("optimize");
+    expect(assessment.maxBudgetRaw).toBe("100");
+    expect(assessment.bestAmountRaw).toBe("25");
+    expect(assessment.quoteAmountRaw).toBe("100");
   });
 });

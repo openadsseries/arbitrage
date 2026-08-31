@@ -14,7 +14,7 @@ const OPPORTUNITY_REVALIDATE_SECONDS = 15;
 export const MAX_PUBLIC_ARBITRAGE_QUOTE = (1n << 128n) - 1n;
 
 const readPersistedArbitrageOpportunity = unstable_cache(
-  async (token: string, amountRaw: string, mode: ArbitrageQuoteMode = "exact") =>
+  async (token: string, amountRaw: string, mode: ArbitrageQuoteMode = "optimize") =>
     readArbitrageOpportunity(getAddress(token), BigInt(amountRaw), { mode }),
   ["arbitrage-opportunity-reserve-v2"],
   { revalidate: OPPORTUNITY_REVALIDATE_SECONDS },
@@ -30,7 +30,7 @@ const readPersistedArbitrageBenchmarkOpportunity = unstable_cache(
 export async function readCachedArbitrageOpportunity(
   token: string,
   amountRaw: string,
-  mode: ArbitrageQuoteMode = "exact",
+  mode: ArbitrageQuoteMode = "optimize",
 ) {
   const cached = await readPersistedArbitrageOpportunity(token, amountRaw, mode);
   if (isOpportunityQuoteFresh(cached.quotedAt)) return cached;

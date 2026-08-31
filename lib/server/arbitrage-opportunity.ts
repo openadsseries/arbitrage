@@ -97,7 +97,7 @@ export async function readArbitrageBenchmarkOpportunityForMarket(
     reserveDecimals: market.reserveDecimals,
   });
   return readArbitrageOpportunityForMarket(market, checkedAmount, {
-    mode: "exact",
+    mode: "optimize",
     benchmarkUsd,
     reservePrice,
   });

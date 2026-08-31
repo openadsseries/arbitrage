@@ -12,7 +12,12 @@ import type {
   ArbitrageOpportunity,
   PublicArbitrageAssessment,
 } from "@/lib/arbitrage";
-import { assessPublicArbitrageOpportunity } from "@/lib/arbitrage";
+import {
+  MARKET_SCAN_DEFAULT_USD,
+  MARKET_SCAN_MAX_USD,
+  MARKET_SCAN_MIN_USD,
+  assessPublicArbitrageOpportunity,
+} from "@/lib/arbitrage";
 import { CHAINS, type ChainKey } from "@/lib/chains";
 import { compact, usd } from "@/lib/format";
 import { readManifests } from "@/lib/manifest";
@@ -22,6 +27,12 @@ type ArbitragePreviewState =
   | { status: "checking" }
   | { status: "loaded"; assessment: PublicArbitrageAssessment }
   | { status: "unavailable" };
+
+const SCAN_BUDGET_PRESETS = [10, 50, 100, 500] as const;
+
+function scanBudgetLabel(value: number) {
+  return `$${value.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+}
 
 function amount(raw: string, decimals: number) {
   return compact(Number(formatUnits(BigInt(raw), decimals)));
@@ -37,17 +48,28 @@ function marketCapUsd(value: number) {
   return value >= 1_000 ? `$${compact(value)}` : usd(value, 2);
 }
 
-function previewLabel(preview: ArbitragePreviewState | undefined) {
+function previewLabel(
+  preview: ArbitragePreviewState | undefined,
+  market: VerifiedMarket,
+) {
   if (!preview || preview.status === "checking") return "Checking";
   if (preview.status === "unavailable") return "—";
   if (preview.assessment.stage === "no-route") return "No return";
-  return `+${(preview.assessment.gapBps / 100).toFixed(2)}% est.`;
+  return `+${amount(preview.assessment.ownerDifferenceRaw, market.reserveDecimals)} ${market.reserveSymbol}`;
 }
 
-function previewHint(preview: ArbitragePreviewState | undefined) {
-  if (!preview || preview.status === "checking") return "Checking $10";
+function previewHint(
+  preview: ArbitragePreviewState | undefined,
+  market: VerifiedMarket,
+  scanBudgetUsd: number,
+) {
+  const budget = `Up to ${scanBudgetLabel(scanBudgetUsd)}`;
+  if (!preview || preview.status === "checking") return budget;
   if (preview.status === "unavailable") return "Unavailable";
-  return "$10 quote";
+  if (preview.assessment.stage === "estimated-return") {
+    return `Best ${amount(preview.assessment.bestAmountRaw, market.reserveDecimals)} ${market.reserveSymbol}`;
+  }
+  return "";
 }
 
 function hasPriceGap(
@@ -80,10 +102,21 @@ export function MarketsBrowser({
   const [addressMatches, setAddressMatches] = useState<VerifiedMarket[]>([]);
   const [walletLaunched, setWalletLaunched] = useState<VerifiedMarket[]>([]);
   const [arbitragePreviews, setArbitragePreviews] = useState<Record<string, ArbitragePreviewState>>({});
+  const [scanBudgetInput, setScanBudgetInput] = useState(
+    String(MARKET_SCAN_DEFAULT_USD),
+  );
   const launchedRequests = useRef(new Set<string>());
   const quoteItemsRef = useRef<
     { token: string; key: string }[]
   >([]);
+  const scanBudgetUsd = useMemo(() => {
+    const value = Number(scanBudgetInput);
+    return Number.isFinite(value) &&
+      value >= MARKET_SCAN_MIN_USD &&
+      value <= MARKET_SCAN_MAX_USD
+      ? value
+      : null;
+  }, [scanBudgetInput]);
 
   useEffect(() => {
     let active = true;
@@ -185,11 +218,11 @@ export function MarketsBrowser({
   );
   const quoteKey = useMemo(
     () =>
-      quoteItems
+      `${scanBudgetUsd ?? "invalid"}:${quoteItems
         .map((item) => item.key)
         .sort()
-        .join("|"),
-    [quoteItems],
+        .join("|")}`,
+    [quoteItems, scanBudgetUsd],
   );
   useEffect(() => {
     quoteItemsRef.current = quoteItems;
@@ -201,6 +234,10 @@ export function MarketsBrowser({
       if (document.visibilityState !== "visible") return;
       const items = quoteItemsRef.current;
       if (items.length === 0) return;
+      if (scanBudgetUsd === null) {
+        setArbitragePreviews({});
+        return;
+      }
       controller?.abort();
       controller = new AbortController();
       setArbitragePreviews((current) => {
@@ -215,7 +252,11 @@ export function MarketsBrowser({
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            items: items.map(({ token }) => ({ token, mode: "benchmark", benchmarkUsd: 10 })),
+            items: items.map(({ token }) => ({
+              token,
+              mode: "benchmark",
+              benchmarkUsd: scanBudgetUsd,
+            })),
           }),
           cache: "no-store",
           signal: controller.signal,
@@ -270,7 +311,7 @@ export function MarketsBrowser({
       window.removeEventListener("focus", refreshWhenVisible);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
-  }, [quoteKey]);
+  }, [quoteKey, scanBudgetUsd]);
 
   async function openBond() {
     const address = query.trim();
@@ -310,6 +351,32 @@ export function MarketsBrowser({
       <section className="markets-directory" aria-label="Markets">
           <form className="market-toolbar" onSubmit={(event) => { event.preventDefault(); void openBond(); }}>
             <div className="market-search"><Search /><input aria-label="Search markets" placeholder="Search token, reserve or address" value={query} onChange={(event) => { setQuery(event.target.value); setAddressMatches([]); }} /></div>
+            <div className="market-scan-budget" aria-label="Scan budget">
+              <span>Scan</span>
+              <div>
+                {SCAN_BUDGET_PRESETS.map((value) => (
+                  <button
+                    aria-pressed={scanBudgetInput === String(value)}
+                    key={value}
+                    onClick={() => setScanBudgetInput(String(value))}
+                    type="button"
+                  >
+                    {scanBudgetLabel(value)}
+                  </button>
+                ))}
+                <input
+                  aria-label="Custom scan budget in USD"
+                  inputMode="decimal"
+                  min="0.01"
+                  max={MARKET_SCAN_MAX_USD}
+                  onChange={(event) => setScanBudgetInput(event.target.value)}
+                  placeholder="$"
+                  step="any"
+                  type="number"
+                  value={scanBudgetInput}
+                />
+              </div>
+            </div>
             <div className="market-filters" role="group" aria-label="Filter markets">
               <button aria-pressed={view === "all"} onClick={() => setView("all")} type="button">All</button>
               <button aria-pressed={view === "price-gaps"} onClick={() => setView("price-gaps")} type="button">Routes</button>
@@ -319,6 +386,7 @@ export function MarketsBrowser({
           </form>
           {error && <p className="form-error">{error}</p>}
           {marketError && <p className="form-error">{marketError}</p>}
+          {scanBudgetUsd === null && <p className="form-error">Enter a scan budget from $0.01 to $10,000.</p>}
           {addressMatches.length > 1 && <div className="network-match-list" aria-label="Matching markets">{addressMatches.map((market) => <button key={`${market.chain}-${market.token}`} type="button" onClick={() => router.push(`/market/${market.chain}/${market.token}`)}><ChainBadge chain={market.chain} /><span><strong>{market.symbol}</strong><small>{CHAINS[market.chain].name}</small></span><ArrowRight /></button>)}</div>}
           {remoteUnavailableChains.length > 0 && <p className="partial-note">Some networks are temporarily unavailable. Available markets remain live.</p>}
           {loadingMarkets && markets.length === 0 ? (
@@ -337,6 +405,11 @@ export function MarketsBrowser({
               {markets.map((market) => {
                 const key = `${market.chain}-${market.token.toLowerCase()}`;
                 const preview = arbitragePreviews[key];
+                const previewHintText = previewHint(
+                  preview,
+                  market,
+                  scanBudgetUsd ?? MARKET_SCAN_DEFAULT_USD,
+                );
                 const href = `/market/${market.chain}/${market.token}`;
                 const prefetch = () => router.prefetch(href);
                 return (
@@ -352,12 +425,12 @@ export function MarketsBrowser({
                   <strong className="market-number" data-label="Market cap" title="Current supply multiplied by the current buy price">{market.impliedMarketCapUsd === null ? `${amount(market.impliedMarketCapReserveRaw, market.reserveDecimals)} ${market.reserveSymbol}` : marketCapUsd(market.impliedMarketCapUsd)}</strong>
                   <strong className="market-number" data-label="Backing">{amount(market.reserveBalanceRaw, market.reserveDecimals)} {market.reserveSymbol}</strong>
                   <span
-                    className="market-number market-arbitrage-preview"
+                    className={`market-number market-arbitrage-preview ${hasPriceGap(preview) ? "state-ready" : ""}`}
                     data-label="Route check"
-                    title="Estimated return for exactly $10. Open the market to enter another amount and verify execution."
+                    title={`Estimated best return within a ${scanBudgetLabel(scanBudgetUsd ?? MARKET_SCAN_DEFAULT_USD)} budget. Open the market to enter another limit and verify execution.`}
                   >
-                    <strong>{previewLabel(preview)}</strong>
-                    <small>{previewHint(preview)}</small>
+                    <strong>{previewLabel(preview, market)}</strong>
+                    {previewHintText && <small>{previewHintText}</small>}
                   </span>
                   <Link className="market-buy" href={href} onFocus={prefetch} onMouseEnter={prefetch}>Arbitrage <ArrowRight /></Link>
                 </div>

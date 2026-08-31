@@ -384,19 +384,28 @@ export function MarketAutomationPanel({
   const relayReason = relayStatus?.ready === false ? relayStatus.message : "";
   const effectiveWatchReason = relayReason || watchReason;
   const activeStatusLabel = arbitrageWatchLabel(effectiveWatchReason);
+  const previewRoute = useMemo(
+    () => selectBestOpportunityRoute(watchOpportunity),
+    [watchOpportunity],
+  );
   const watchRoute = useMemo(() => {
     if (
       !running ||
       watchOpportunity?.checkedAmountRaw !== running.maxReservePerExecutionRaw
     )
       return null;
-    const route = selectBestOpportunityRoute(watchOpportunity);
-    return route &&
-      Boolean(route.netPositive ?? route.profitable) &&
-      BigInt(route.ownerDifferenceRaw) > 0n
-      ? route
+    return previewRoute &&
+      Boolean(previewRoute.netPositive ?? previewRoute.profitable) &&
+      BigInt(previewRoute.ownerDifferenceRaw) > 0n
+      ? previewRoute
       : null;
-  }, [running, watchOpportunity]);
+  }, [previewRoute, running, watchOpportunity]);
+  const bestPreviewAmountRaw =
+    previewRoute &&
+    Boolean(previewRoute.netPositive ?? previewRoute.profitable) &&
+    BigInt(previewRoute.ownerDifferenceRaw) > 0n
+      ? previewRoute.amountInRaw
+      : null;
   const watchRouteReady = Boolean(watchRoute);
   const routeChecks = useMemo(
     () =>
@@ -1050,7 +1059,7 @@ export function MarketAutomationPanel({
         <>
           <span className="kicker">2 · Start</span>
           <div className="market-auto-budget">
-            <label htmlFor="arbitrage-budget">Per run</label>
+            <label htmlFor="arbitrage-budget">Max per run</label>
             <div className="market-auto-budget-input">
               <input
                 id="arbitrage-budget"
@@ -1074,7 +1083,15 @@ export function MarketAutomationPanel({
                 </dd>
               </div>
               <div>
-                <dt>Route estimate</dt>
+                <dt>Best size</dt>
+                <dd>
+                  {bestPreviewAmountRaw
+                    ? `${reserveAmount(bestPreviewAmountRaw, market.reserveDecimals)} ${market.reserveSymbol}`
+                    : "—"}
+                </dd>
+              </div>
+              <div>
+                <dt>Est. profit</dt>
                 <dd className={estimatedProfitRaw ? "positive" : ""}>
                   {estimatedProfitRaw
                     ? `+${reserveAmount(estimatedProfitRaw, market.reserveDecimals)} ${market.reserveSymbol}`

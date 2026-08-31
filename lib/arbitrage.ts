@@ -12,6 +12,9 @@ import type { ChainKey } from "@/lib/chains";
 // selected from live onchain quotes by the executor service.
 export const ARBITRAGE_ONE_CLICK_VALIDITY_SECONDS = 24 * 60 * 60;
 export const ARBITRAGE_V4_MIN_NET_RETURN_BPS = 10;
+export const MARKET_SCAN_DEFAULT_USD = 10;
+export const MARKET_SCAN_MIN_USD = 0.01;
+export const MARKET_SCAN_MAX_USD = 10_000;
 
 export const ARBITRAGE_EXECUTOR_ABI = parseAbi([
   "function startStrategy(address hToken,uint256 maxWethPerExecution,uint256 minProfit,uint40 validUntil) returns (uint256 strategyId)",
@@ -349,6 +352,9 @@ export function reserveAmountForUsdBenchmark(input: {
 export type PublicArbitrageAssessment =
   | {
       stage: "estimated-return";
+      maxBudgetRaw: string;
+      bestAmountRaw: string;
+      /** Kept for already-open tabs before max-budget naming. */
       quoteAmountRaw: string;
       quoteMode: ArbitrageQuoteMode;
       benchmarkUsd: number | null;
@@ -361,6 +367,8 @@ export type PublicArbitrageAssessment =
     }
   | {
       stage: "no-route";
+      maxBudgetRaw: string;
+      /** Kept for already-open tabs before max-budget naming. */
       quoteAmountRaw: string;
       quoteMode: ArbitrageQuoteMode;
       benchmarkUsd: number | null;
@@ -391,6 +399,7 @@ export function assessPublicArbitrageOpportunity(
   if (!route || !route.netPositive) {
     return {
       stage: "no-route",
+      maxBudgetRaw: opportunity.checkedAmountRaw,
       quoteAmountRaw: opportunity.checkedAmountRaw,
       quoteMode: opportunity.quoteMode,
       benchmarkUsd: opportunity.benchmarkUsd,
@@ -402,6 +411,8 @@ export function assessPublicArbitrageOpportunity(
   }
   return {
     stage: "estimated-return",
+    maxBudgetRaw: opportunity.checkedAmountRaw,
+    bestAmountRaw: route.amountInRaw,
     quoteAmountRaw: opportunity.checkedAmountRaw,
     quoteMode: opportunity.quoteMode,
     benchmarkUsd: opportunity.benchmarkUsd,

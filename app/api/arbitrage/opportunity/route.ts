@@ -18,6 +18,7 @@ const requestSchema = z.object({
         BigInt(value) > 0n && BigInt(value) <= MAX_PUBLIC_ARBITRAGE_QUOTE,
       "Enter a valid Reserve Token budget.",
     ),
+  mode: z.enum(["exact", "optimize"]).optional(),
 });
 
 export async function GET(request: Request) {
@@ -31,11 +32,12 @@ export async function GET(request: Request) {
     const input = requestSchema.parse({
       token: url.searchParams.get("token"),
       amountRaw: url.searchParams.get("amountRaw"),
+      mode: url.searchParams.get("mode") ?? undefined,
     });
     const opportunity = await readCachedArbitrageOpportunity(
       getAddress(input.token),
       input.amountRaw,
-      "exact",
+      input.mode ?? "optimize",
     );
     return Response.json(
       { opportunity },
@@ -53,7 +55,7 @@ export async function GET(request: Request) {
         error:
           reason instanceof Error
             ? reason.message
-            : "The price gap could not be checked.",
+            : "The route return could not be checked.",
       },
       { status: 400 },
     );

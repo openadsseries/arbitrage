@@ -208,7 +208,7 @@ export function QuickBuyPanel({ market, onClose, embedded = false }: { market: V
             <a href={`${CHAINS[market.chain].explorerUrl}/tx/${transactionHash}`} target="_blank" rel="noreferrer">View transaction <ExternalLink /></a>
           </div>
         ) : (
-          <form onSubmit={trade}>
+          <form data-trade-side={side} onSubmit={trade}>
             <span className="kicker">Direct exchange</span>
             <div className="trade-side-tabs" role="tablist" aria-label={`Trade ${market.symbol}`}>
               <button type="button" role="tab" aria-selected={side === "buy"} className={side === "buy" ? "selected" : ""} onClick={() => changeSide("buy")}>Buy</button>

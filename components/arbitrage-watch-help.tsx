@@ -91,7 +91,7 @@ export function arbitrageWatchCopy(reason: string) {
       meaning:
         "The app is checking both directions, but the current route cannot execute profitably.",
       action:
-        "Wait for the price gap to widen or use a market with deeper liquidity.",
+        "Wait for the route return to improve or use a market with deeper liquidity.",
     };
   }
   return {

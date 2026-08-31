@@ -443,7 +443,7 @@ export function ArbitragePriceGap({
         setLoading(true);
       }
       fetch(
-        `/api/arbitrage/opportunity?token=${market.token}&amountRaw=${quotedAmountRaw}`,
+        `/api/arbitrage/opportunity?token=${market.token}&amountRaw=${quotedAmountRaw}&mode=optimize`,
         {
           cache: "no-store",
           signal: controller.signal,
@@ -456,7 +456,7 @@ export function ArbitragePriceGap({
           };
           if (!response.ok || !payload.opportunity)
             throw new Error(
-              payload.error ?? "The price gap could not be checked.",
+              payload.error ?? "The route return could not be checked.",
             );
           if (!alive) return;
           opportunityRef.current = payload.opportunity;
@@ -472,7 +472,7 @@ export function ArbitragePriceGap({
             setError(
               reason instanceof Error
                 ? reason.message
-                : "The price gap could not be checked.",
+                : "The route return could not be checked.",
             );
           }
         })
@@ -555,9 +555,8 @@ export function ArbitragePriceGap({
       )
     : null;
   const headline = (() => {
-    if (active && netPositive && route)
-      return `+${((route.netReturnBps ?? route.gapBps) / 100).toFixed(2)}% price gap`;
-    if (!active && netPositive && route) return "Route estimate";
+    if (active && netPositive && route) return "Executable route";
+    if (!active && netPositive && route) return "Best route estimate";
     if (active && !activeQuote) {
       if (/unavailable|read failed/i.test(activeReason))
         return "Price check unavailable";
