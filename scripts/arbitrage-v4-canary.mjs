@@ -26,10 +26,12 @@ const RELAY_MINIMUM_WEI = integer(
   100_000_000_000_000n,
 );
 const MIN_PROFIT_BPS = 10;
+const REJECTION_MIN_PROFIT_BPS = 1_000;
 const MAX_FEE_BPS = 200n;
 const BPS = 10_000n;
 const RESUME = process.argv.includes("--resume");
 const CLEANUP = process.argv.includes("--cleanup");
+const REJECTION = process.argv.includes("--rejection");
 
 const executorAbi = parseAbi([
   "event StrategyStarted(uint256 indexed strategyId,address indexed owner,address indexed hToken,address reserveToken,uint256 maxReservePerExecution,uint256 totalVolume,uint256 minProfitReserve,uint16 minProfitBps,uint256 maxFeeReimbursementReserve,uint40 validUntil)",
@@ -406,7 +408,7 @@ try {
       purchased,
       purchased,
       1n,
-      MIN_PROFIT_BPS,
+      REJECTION ? REJECTION_MIN_PROFIT_BPS : MIN_PROFIT_BPS,
       maximumFee,
       BigInt(Math.floor(Date.now() / 1_000) + 60 * 60),
     ],
@@ -428,44 +430,91 @@ try {
   console.log(
     `Relay result: ${relayResult.status}${relayResult.code ? ` (${relayResult.code})` : ""}${relayResult.error ? ` - ${relayResult.error}` : ""}`,
   );
-  if (relayResult.status !== "executed" || !relayResult.hash) {
+  if (REJECTION) {
+    if (
+      relayResult.status !== "none" ||
+      relayResult.code !== "no-profitable-route"
+    ) {
+      throw new Error(
+        `V4 rejection was not conclusive: ${relayResult.error || relayResult.status}`,
+      );
+    }
+    await revokeAndStop(strategyId);
+    const [finalStrategy, finalAllowance, finalMt] = await Promise.all([
+      primaryPublicClient.readContract({
+        address: EXECUTOR,
+        abi: executorAbi,
+        functionName: "strategies",
+        args: [strategyId],
+      }),
+      primaryPublicClient.readContract({
+        address: MT,
+        abi: erc20Abi,
+        functionName: "allowance",
+        args: [deployer.address, EXECUTOR],
+      }),
+      primaryPublicClient.readContract({
+        address: MT,
+        abi: erc20Abi,
+        functionName: "balanceOf",
+        args: [deployer.address],
+      }),
+    ]);
+    if (
+      finalStrategy[4] ||
+      finalStrategy[5] !== 0n ||
+      finalAllowance !== 0n ||
+      finalMt !== before.deployerMt
+    ) {
+      throw new Error(
+        "V4 rejection changed funds, execution count, or permission.",
+      );
+    }
+    cleanupNeeded = false;
+    cleanupStrategyId = 0n;
+    console.log(`Final MT: ${formatUnits(finalMt, 18)} MT`);
+    console.log("V4 rejection canary: passed");
+  } else if (relayResult.status !== "executed" || !relayResult.hash) {
     throw new Error(
       `V4 did not execute: ${relayResult.error || relayResult.status}`,
     );
-  }
-  const executionReceipt = await receipt(relayResult.hash);
+  } else {
+    const executionReceipt = await receipt(relayResult.hash);
 
-  const [finalStrategy, finalAllowance, finalMt] = await Promise.all([
-    primaryPublicClient.readContract({
-      address: EXECUTOR,
-      abi: executorAbi,
-      functionName: "strategies",
-      args: [strategyId],
-      blockNumber: executionReceipt.blockNumber,
-    }),
-    primaryPublicClient.readContract({
-      address: MT,
-      abi: erc20Abi,
-      functionName: "allowance",
-      args: [deployer.address, EXECUTOR],
-      blockNumber: executionReceipt.blockNumber,
-    }),
-    primaryPublicClient.readContract({
-      address: MT,
-      abi: erc20Abi,
-      functionName: "balanceOf",
-      args: [deployer.address],
-      blockNumber: executionReceipt.blockNumber,
-    }),
-  ]);
-  if (finalStrategy[4] || finalStrategy[8] !== 0n || finalAllowance !== 0n) {
-    throw new Error("V4 canary left an active strategy, budget, or allowance.");
+    const [finalStrategy, finalAllowance, finalMt] = await Promise.all([
+      primaryPublicClient.readContract({
+        address: EXECUTOR,
+        abi: executorAbi,
+        functionName: "strategies",
+        args: [strategyId],
+        blockNumber: executionReceipt.blockNumber,
+      }),
+      primaryPublicClient.readContract({
+        address: MT,
+        abi: erc20Abi,
+        functionName: "allowance",
+        args: [deployer.address, EXECUTOR],
+        blockNumber: executionReceipt.blockNumber,
+      }),
+      primaryPublicClient.readContract({
+        address: MT,
+        abi: erc20Abi,
+        functionName: "balanceOf",
+        args: [deployer.address],
+        blockNumber: executionReceipt.blockNumber,
+      }),
+    ]);
+    if (finalStrategy[4] || finalStrategy[8] !== 0n || finalAllowance !== 0n) {
+      throw new Error(
+        "V4 canary left an active strategy, budget, or allowance.",
+      );
+    }
+    cleanupNeeded = false;
+    cleanupStrategyId = 0n;
+    console.log(`Execution: ${relayResult.hash}`);
+    console.log(`Final MT: ${formatUnits(finalMt, 18)} MT`);
+    console.log("V4 canary: passed");
   }
-  cleanupNeeded = false;
-  cleanupStrategyId = 0n;
-  console.log(`Execution: ${relayResult.hash}`);
-  console.log(`Final MT: ${formatUnits(finalMt, 18)} MT`);
-  console.log("V4 canary: passed");
 } finally {
   if (cleanupNeeded) {
     try {

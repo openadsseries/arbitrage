@@ -16,7 +16,7 @@ receive production traffic until the remaining canary release gates below pass.
 - Activation: disabled; V3 remains the production executor
 - Control-path canary: passed on Base for exact approval, strategy start, stop, and allowance revoke
 - Live assessment canary: invalid; an RPC-backed check was misclassified as `no-profitable-route`
-- Reliable rejection canary: pending a complete fresh quote that proves the exact blocked reason
+- Reliable rejection canary: passed with a complete fresh quote, no execution, and unchanged funds
 - Latest Base fork execution canary: passed with retained MT through `Buy then redeem`
 - Profitable execution canary: passed live through `Buy then redeem` with protected owner profit
 - Public RPC gate: passed with batched latest-state quote, simulation, submission, and receipt fallback
@@ -107,6 +107,19 @@ Public-RPC live execution canary:
 - Protected owner profit: `14.069197877613692266 MT`
 - Final owner balance: `1068.993255350916854891 MT`
 - Final state: active strategy `0`, V4 MT allowance `0`, remaining volume `0`, execution count `1`
+
+Public-RPC economic rejection canary:
+
+- Strategy `#13` used the full `1068.993255350916854891 MT` budget with a deliberately
+  unreachable 10% user minimum profit.
+- The production relay completed the fresh assessment and returned
+  `no-profitable-route`; it did not submit an execution transaction.
+- Approve: `0x55c882b01715d89341ebf830c2ac0d8981158729e86ba241caa3af34c0c22740`
+- Start: `0xaa2e14d7cbf70e0f36c5dc7833c602a44ae6c08a1311e0a0b1ed7d6dd420d909`
+- Stop: `0xe27c112a26ff2c15923d1c911493fe980565fdd7f88a4f83a9c28ebd4664ca65`
+- Revoke: `0xd4423e1ec1300d0d580989b203087a66b6649779d87eee10622710cf1d063632`
+- Final state: owner MT unchanged at `1068.993255350916854891 MT`, active strategy `0`,
+  V4 MT allowance `0`, execution count `0`
 
 The binding objective, compatibility policy, release gates, rollback rules, and prohibited
 shortcuts are defined in [`../docs/ARBITRAGE_V4_MIGRATION.md`](../docs/ARBITRAGE_V4_MIGRATION.md).

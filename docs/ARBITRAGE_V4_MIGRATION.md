@@ -1,7 +1,7 @@
 # Arbitrage V4 migration
 
-Status: deployed on Base, control, latest Base fork, and public-RPC live profitable
-canaries passed; feature gate remains off pending the complete rejection and UI gates
+Status: deployed on Base; control, latest Base fork, public-RPC live profitable, and
+complete rejection canaries passed; feature gate remains off pending the UI gate
 
 The Base control-path canary completed exact approval, strategy start, stop, and allowance
 revocation with no token movement. A funded live hMT canary exposed an application bug:
@@ -16,7 +16,9 @@ quoting the legacy V3 WETH route and evaluating bounded amounts sequentially. Th
 now quotes the same router path the contract executes and batches each search layer. Latest
 public Base reads complete without a private RPC subscription. A live public-RPC strategy
 then settled `Buy then redeem`, leaving the owner with protected net MT profit and clearing
-the strategy and allowance. V3 remains active until the complete rejection and UI gates pass.
+the strategy and allowance. A separate strategy using a 10% user minimum completed both
+route assessments, returned `no-profitable-route`, moved no MT, and cleared the strategy
+and allowance. V3 remains active until the UI gate passes.
 
 ## Why V4 exists
 
